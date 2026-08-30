@@ -1,20 +1,33 @@
 # Preparação do Mac para desenvolvimento
 
-## Situação atual
+## Situação verificada em 30/08/2026
 
-- GitHub conectado ao Codex e identidade Git configurada somente neste repositório.
-- Repositório Git local na branch `main`, ainda sem remoto.
-- Ambiente Python isolado `.venv` pronto e ignorado pelo Git.
-- Docker, PostgreSQL, GitHub CLI, Homebrew e Command Line Tools do Xcode ainda não estão disponíveis no host.
+- Command Line Tools do Xcode 16.4 e Git 2.39.5 disponíveis.
+- Docker Desktop 4.88.1, Engine 29.7.2 e Compose 5.4.0 funcionando em Apple Silicon.
+- PostgreSQL 17.11 saudável no Docker, exposto somente em `127.0.0.1:5432`.
+- Migração `001_foundation.sql` aplicada; o esquema inicial contém 16 tabelas.
+- Python 3.12.13 e `uv` 0.12.7 instalados somente dentro do projeto.
+- Ambiente `.venv` recriado com esse Python e todas as versões de `requirements.lock`.
+- GitHub CLI 2.98.0 instalado somente no projeto e autenticado via chaveiro do macOS.
+- Repositório Git local na branch `main`, com identidade configurada somente neste repositório.
 
-## Instalação mínima recomendada
+As pastas `.tools/` e `.venv/` são locais e ignoradas pelo Git. Homebrew, cliente `psql` no host e uma máquina virtual separada não são necessários: o Docker já fornece o PostgreSQL e sua própria VM Linux interna.
 
-1. **Command Line Tools do Xcode** - fornece o Git e a cadeia de compilação nativos do macOS. Instalar com `xcode-select --install` e concluir a janela do sistema.
-2. **Docker Desktop para Apple Silicon** - fornece Docker Engine, CLI, Compose e a VM Linux interna. Não instalar uma VM separada.
-3. **Python 3.12 estável no host** - necessário para o serviço rodar fora da sessão do Codex. Pode ser instalado pelo pacote oficial do Python ou por Homebrew.
-4. **GitHub CLI (`gh`)** - opcional, mas recomendado para autenticar o Git do terminal, criar o repositório remoto e fazer `push` sem armazenar token manualmente.
+## Operação diária
 
-O PostgreSQL não precisa ser instalado separadamente se o `compose.yaml` for usado. O contêiner já está fixado em PostgreSQL 17.11 e só publica a porta em `127.0.0.1`.
+```bash
+docker compose up -d postgres
+PYTHONPATH=src .venv/bin/python scripts/migrate.py
+.venv/bin/legal-monitor doctor
+.venv/bin/ruff check .
+.venv/bin/python -m pytest
+```
+
+Para encerrar os contêineres sem apagar os dados do banco:
+
+```bash
+docker compose stop
+```
 
 ## Não instalar agora
 
@@ -24,17 +37,6 @@ O PostgreSQL não precisa ser instalado separadamente se o `compose.yaml` for us
 - Playwright, navegadores e perfis persistentes antes do marco M4;
 - ferramentas de quebra de CAPTCHA ou automação de 2FA;
 - automação de WhatsApp Web.
-
-## Ordem de ativação após as instalações
-
-```bash
-docker compose up -d postgres
-PYTHONPATH=src .venv/bin/python scripts/migrate.py
-.venv/bin/legal-monitor doctor
-.venv/bin/python -m pytest
-```
-
-Para o GitHub no terminal, instalar `gh`, executar `gh auth login` e selecionar HTTPS. Depois criar ou vincular um repositório **privado** por padrão e adicionar o remoto `origin`.
 
 ## Portão para integrações reais
 

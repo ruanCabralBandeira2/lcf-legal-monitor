@@ -17,25 +17,22 @@ Não há Selenium. Também não há automação de WhatsApp Web, quebra de CAPTC
 
 ## Preparação local
 
-Requisitos para a operação real: Python 3.12+, PostgreSQL 17 e, em marcos posteriores, Playwright instalado no host. O `compose.yaml` oferece PostgreSQL local quando Docker estiver disponível.
+Este Mac já está preparado com Python 3.12 isolado no projeto, Docker Desktop, Docker Compose e PostgreSQL 17 em contêiner. Em marcos posteriores, a automação de navegador poderá usar Playwright; Selenium não faz parte da arquitetura.
 
 Consulte também o [guia de preparação do Mac](docs/DEVELOPMENT_SETUP.md).
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.lock
-cp .env.example .env
 git config core.hooksPath .githooks
-PYTHONPATH=src python -m legal_monitor.cli doctor
-PYTHONPATH=src python -m unittest discover -s tests -v
+.venv/bin/legal-monitor doctor
+.venv/bin/ruff check .
+.venv/bin/python -m pytest
 ```
 
 Para iniciar o banco com Docker:
 
 ```bash
 docker compose up -d postgres
-PYTHONPATH=src python scripts/migrate.py
+PYTHONPATH=src .venv/bin/python scripts/migrate.py
 ```
 
 ## Fluxo seguro de desenvolvimento
@@ -48,4 +45,4 @@ PYTHONPATH=src python scripts/migrate.py
 
 ## Limites desta entrega
 
-O repositório não acessa TJRJ, PJe, eproc, DCP, DJEN, e-mail, WhatsApp ou serviços de IA. Isso é intencional: processo-piloto, usuários, SLAs, provedor oficial, retenção, backup e base legal ainda são decisões abertas do M0. O banco também não foi iniciado nesta máquina porque Docker/PostgreSQL não estão instalados no ambiente atual.
+O repositório não acessa TJRJ, PJe, eproc, DCP, DJEN, e-mail, WhatsApp ou serviços de IA. Isso é intencional: processo-piloto, usuários, SLAs, provedor oficial, retenção, backup e base legal ainda são decisões abertas do M0. O PostgreSQL local contém apenas o esquema inicial e dados de desenvolvimento.

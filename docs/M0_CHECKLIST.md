@@ -18,10 +18,11 @@ Nenhum conector real deve ser ativado antes de este checklist ser aprovado por r
 ## Inventário do Mac observado em 30/08/2026
 
 - macOS 15.6 em Apple Silicon arm64.
-- Runtime Python 3.12 disponível pelo ambiente do Codex.
-- Docker, `psql` e PostgreSQL não encontrados.
-- Ferramentas de linha de comando do Xcode não instaladas; o Git do runtime do Codex está disponível.
-- Nenhum repositório ou código anterior encontrado na pasta do projeto.
+- Python 3.12.13 próprio do projeto, independente do ambiente do Codex.
+- Docker Desktop e PostgreSQL 17.11 em contêiner instalados e saudáveis.
+- Cliente `psql` disponível dentro do contêiner; instalação duplicada no host dispensada.
+- Command Line Tools do Xcode e Git nativo instalados.
+- Repositório Git local inicializado na branch `main`.
 
 ## Critério de saída
 

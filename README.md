@@ -11,6 +11,8 @@ Base local e auditável para detectar movimentações relevantes, preservar peç
 - migração PostgreSQL para as entidades essenciais, constraints e idempotência;
 - logging JSON com mascaramento de números CNJ;
 - CLI de diagnóstico e demonstração segura;
+- scheduler PostgreSQL com jobs idempotentes, leases, recuperação e retentativas;
+- heartbeat interno e visão separada de saúde da plataforma e atraso dos processos;
 - testes unitários que não precisam de rede nem de dados reais.
 
 Não há Selenium. Também não há automação de WhatsApp Web, quebra de CAPTCHA, captura de 2FA, cálculo de prazo ou envio ao cliente.
@@ -33,6 +35,15 @@ Para iniciar o banco com Docker:
 ```bash
 docker compose up -d postgres
 PYTHONPATH=src .venv/bin/python scripts/migrate.py
+.venv/bin/legal-monitor scheduler-heartbeat
+.venv/bin/legal-monitor scheduler-health
+```
+
+Teste seguro e idempotente do worker, sem acessar fonte externa:
+
+```bash
+.venv/bin/legal-monitor scheduler-enqueue-healthcheck --key primeiro-smoke-local
+.venv/bin/legal-monitor scheduler-run-once
 ```
 
 ## Fluxo seguro de desenvolvimento
@@ -46,3 +57,5 @@ PYTHONPATH=src .venv/bin/python scripts/migrate.py
 ## Limites desta entrega
 
 O repositório não acessa TJRJ, PJe, eproc, DCP, DJEN, e-mail, WhatsApp ou serviços de IA. Isso é intencional: processo-piloto, usuários, SLAs, provedor oficial, retenção, backup e base legal ainda são decisões abertas do M0. O PostgreSQL local contém apenas o esquema inicial e dados de desenvolvimento.
+
+O estado completo para retomadas está em [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). A especificação consolidada está versionada em [docs/source](docs/source/especificacao_base_robo_monitoramento_juridico_v4.pdf).

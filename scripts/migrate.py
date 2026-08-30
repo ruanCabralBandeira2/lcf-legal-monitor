@@ -37,9 +37,7 @@ def main() -> int:
             """
         )
         connection.execute("SELECT pg_advisory_xact_lock(%s)", (LOCK_ID,))
-        applied_rows = connection.execute(
-            "SELECT version, sha256 FROM schema_migration"
-        ).fetchall()
+        applied_rows = connection.execute("SELECT version, sha256 FROM schema_migration").fetchall()
         applied = dict(applied_rows)
         for path in migration_files:
             version = path.name.split("_", 1)[0]

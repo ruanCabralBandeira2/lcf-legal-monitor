@@ -59,6 +59,17 @@ class SettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.app_env.value, "production")
 
+    def test_rejects_backoff_base_greater_than_maximum(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "não pode exceder"):
+            Settings.from_env(
+                {
+                    "SCHEDULER_BASE_BACKOFF_SECONDS": "120",
+                    "SCHEDULER_MAX_BACKOFF_SECONDS": "60",
+                },
+                root_dir=self.root,
+                load_dotenv=False,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

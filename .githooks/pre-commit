@@ -6,5 +6,6 @@ if [ ! -x .venv/bin/ruff ] || [ ! -x .venv/bin/pytest ]; then
   exit 1
 fi
 
+.venv/bin/ruff format --check .
 .venv/bin/ruff check .
 .venv/bin/python -m pytest

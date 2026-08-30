@@ -5,7 +5,7 @@
 - Command Line Tools do Xcode 16.4 e Git 2.39.5 disponíveis.
 - Docker Desktop 4.88.1, Engine 29.7.2 e Compose 5.4.0 funcionando em Apple Silicon.
 - PostgreSQL 17.11 saudável no Docker, exposto somente em `127.0.0.1:5432`.
-- Migração `001_foundation.sql` aplicada; o esquema inicial contém 16 tabelas.
+- Migrações `001_foundation.sql` e `002_scheduler_health.sql` aplicadas; o esquema contém 17 tabelas.
 - Python 3.12.13 e `uv` 0.12.7 instalados somente dentro do projeto.
 - Ambiente `.venv` recriado com esse Python e todas as versões de `requirements.lock`.
 - GitHub CLI 2.98.0 instalado somente no projeto e autenticado via chaveiro do macOS.
@@ -19,6 +19,8 @@ As pastas `.tools/` e `.venv/` são locais e ignoradas pelo Git. Homebrew, clien
 docker compose up -d postgres
 PYTHONPATH=src .venv/bin/python scripts/migrate.py
 .venv/bin/legal-monitor doctor
+.venv/bin/legal-monitor scheduler-heartbeat
+.venv/bin/legal-monitor scheduler-health
 .venv/bin/ruff check .
 .venv/bin/python -m pytest
 ```

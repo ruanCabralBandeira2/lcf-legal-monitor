@@ -48,7 +48,7 @@ def _load_env_file(path: Path) -> dict[str, str]:
         key = key.strip()
         if not key or any(char.isspace() for char in key):
             raise ConfigError(f"Chave inválida na linha {line_number} de {path.name}")
-        values[key] = value.strip().strip("\"").strip("'")
+        values[key] = value.strip().strip('"').strip("'")
     return values
 
 
@@ -65,6 +65,12 @@ class Settings:
     real_connectors_enabled: bool
     whatsapp_enabled: bool
     summary_enabled: bool
+    scheduler_lease_seconds: int
+    scheduler_batch_size: int
+    scheduler_max_attempts: int
+    scheduler_base_backoff_seconds: int
+    scheduler_max_backoff_seconds: int
+    worker_stale_seconds: int
 
     @classmethod
     def from_env(
@@ -112,6 +118,48 @@ class Settings:
             real_connectors_enabled=_parse_bool(merged.get("REAL_CONNECTORS_ENABLED")),
             whatsapp_enabled=_parse_bool(merged.get("WHATSAPP_ENABLED")),
             summary_enabled=_parse_bool(merged.get("SUMMARY_ENABLED")),
+            scheduler_lease_seconds=_parse_int(
+                merged,
+                "SCHEDULER_LEASE_SECONDS",
+                default=300,
+                minimum=30,
+                maximum=3_600,
+            ),
+            scheduler_batch_size=_parse_int(
+                merged,
+                "SCHEDULER_BATCH_SIZE",
+                default=10,
+                minimum=1,
+                maximum=100,
+            ),
+            scheduler_max_attempts=_parse_int(
+                merged,
+                "SCHEDULER_MAX_ATTEMPTS",
+                default=4,
+                minimum=1,
+                maximum=20,
+            ),
+            scheduler_base_backoff_seconds=_parse_int(
+                merged,
+                "SCHEDULER_BASE_BACKOFF_SECONDS",
+                default=60,
+                minimum=1,
+                maximum=86_400,
+            ),
+            scheduler_max_backoff_seconds=_parse_int(
+                merged,
+                "SCHEDULER_MAX_BACKOFF_SECONDS",
+                default=3_600,
+                minimum=1,
+                maximum=604_800,
+            ),
+            worker_stale_seconds=_parse_int(
+                merged,
+                "WORKER_STALE_SECONDS",
+                default=600,
+                minimum=60,
+                maximum=86_400,
+            ),
         )
         settings.validate()
         return settings
@@ -137,3 +185,25 @@ class Settings:
             raise ConfigError("Conectores reais exigem M0_APPROVED=true")
         if self.whatsapp_enabled and not self.m0_approved:
             raise ConfigError("WhatsApp exige M0_APPROVED=true")
+        if self.scheduler_base_backoff_seconds > self.scheduler_max_backoff_seconds:
+            raise ConfigError(
+                "SCHEDULER_BASE_BACKOFF_SECONDS não pode exceder SCHEDULER_MAX_BACKOFF_SECONDS"
+            )
+
+
+def _parse_int(
+    values: Mapping[str, str],
+    key: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = values.get(key, str(default))
+    try:
+        parsed = int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"{key} deve ser inteiro") from exc
+    if not minimum <= parsed <= maximum:
+        raise ConfigError(f"{key} deve ficar entre {minimum} e {maximum}")
+    return parsed

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+if [ ! -x .venv/bin/ruff ] || [ ! -x .venv/bin/pytest ]; then
+  echo "Ambiente ausente. Prepare .venv e instale requirements.lock antes do commit."
+  exit 1
+fi
+
+.venv/bin/ruff check .
+.venv/bin/python -m pytest

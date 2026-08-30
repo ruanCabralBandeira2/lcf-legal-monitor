@@ -1,0 +1,24 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Dados operacionais e segredos nunca entram no Git.
+browser_profiles/
+storage/documents/*
+storage/tmp/*
+storage/backups/*
+logs/*
+!storage/documents/.gitkeep
+!storage/tmp/.gitkeep
+!storage/backups/.gitkeep
+!logs/.gitkeep

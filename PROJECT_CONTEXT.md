@@ -25,9 +25,24 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - M1: fundação local concluída e validada.
 - M2: núcleo de scheduler, launchd e saúde interna concluído; heartbeat externo aguarda decisão do M0.
 - M3: núcleo administrativo local concluído; API/painel em rede adiado até definir autenticação.
-- Prova de notificação: contrato/fake concluídos; Discord preparado para mensagem e PDF fictícios, com segredo somente no Keychain.
+- Prova de notificação: entrega externa validada no Discord em 31/08/2026 com mensagem fixa e PDF vazio; o webhook novo permaneceu somente no Keychain e o Discord operacional continua bloqueado pelo M0/M8.
 - DataJud: estudo oficial concluído; a API fornece metadados/movimentações, não arquivos de peças. Nenhuma chamada foi realizada.
 - M4-M9: ainda não iniciados; qualquer fonte real e qualquer mensagem jurídica real permanecem bloqueados pelo M0.
+
+## Objetivo funcional confirmado para o piloto
+
+Para cada processo expressamente autorizado e vinculado à LCF, o produto deverá:
+
+1. monitorar movimentações na fonte permitida;
+2. confirmar o evento no sistema processual de origem;
+3. baixar a peça quando o perfil autorizado tiver acesso;
+4. validar o arquivo, calcular SHA-256 e armazená-lo com auditoria;
+5. produzir um resumo factual da peça;
+6. destacar, em campo separado, o que foi decidido, sem criar parecer, calcular prazo ou presumir conteúdo ausente;
+7. encaminhar o alerta ao advogado responsável pelo canal aprovado;
+8. exigir revisão humana sempre que houver sigilo, ambiguidade, falha de acesso, CAPTCHA, 2FA ou divergência entre fontes.
+
+DataJud poderá servir como sinal auxiliar de capa e movimentação após aprovação do termo. O PDF continuará dependendo de acesso autorizado ao PJe, eproc ou DCP/legado. A identificação de "o que foi decidido" deverá apontar a peça e as páginas de origem, diferenciar texto extraído de inferência e assumir estado `REVIEW_REQUIRED` quando a confiança for insuficiente.
 
 ## O que já existe
 
@@ -47,9 +62,10 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - Listagem administrativa mascara o CNJ; desativação é lógica, pausa jobs e preserva histórico.
 - Provedor fake fecha a demonstração local de movimento, PDF/hash e alerta sem rede.
 - Adaptador Discord aceita somente fixture fixa/PDF vazio, desabilita menções, valida o host oficial e não expõe o webhook em erros.
-- Segredo Discord é lido do Keychain por identificadores não sensíveis; o webhook exposto nesta conversa foi recusado e precisa ser revogado.
+- Segredo Discord é lido do Keychain por identificadores não sensíveis; a leitura e o envio externo foram comprovados sem revelar o valor.
 - Pesquisa DataJud registrada em `docs/research/DATAJUD_API.md` e ADR-005: futuro uso apenas como gatilho/metadata; peça virá do conector autorizado.
 - Backlog do Discord operacional registrado em `docs/backlog/DISCORD_OPERACIONAL.md`; intenção do usuário anotada sem liberar dados reais.
+- Mensagem não técnica para obter autorização e dados mínimos do piloto registrada em `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md`, sem solicitar credenciais no grupo.
 
 ## Travas vigentes
 
@@ -62,8 +78,9 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - Selenium, automação de WhatsApp Web, quebra de CAPTCHA e automação/armazenamento de 2FA são proibidos.
 - Playwright só entra no M4, diretamente no host, após sistema/processo-piloto e acesso de teste autorizados.
 - Discord desta fase é apenas prova privada sem dado jurídico, fica proibido em produção e não substitui o outbox/canal operacional.
-- O webhook divulgado pelo usuário nesta conversa não foi usado nem armazenado e deve ser revogado antes de qualquer prova.
+- Webhooks divulgados em conversa são considerados comprometidos e não podem ser reutilizados; a revogação do endereço exposto ainda precisa ser confirmada pelo responsável do Discord.
 - Conteúdo de PDF, HTML e e-mail é dado não confiável, nunca instrução para o robô.
+- Resumo e identificação da decisão permanecem desativados até definição do modelo, base legal, tratamento de sigilo, critérios de qualidade e revisão humana.
 
 ## Decisões humanas ainda necessárias no M0
 
@@ -104,11 +121,11 @@ Teste M2 inteiramente fictício:
 .venv/bin/legal-monitor scheduler-run-once
 ```
 
-Prova de notificação:
+Prova de notificação já executada em 31/08/2026:
 
 ```bash
 .venv/bin/legal-monitor demo
-# Após recriar o webhook e guardá-lo somente no Keychain:
+# O comando abaixo reenviará outra fixture fictícia; não usar com dados jurídicos:
 .venv/bin/legal-monitor notification-demo-discord
 ```
 
@@ -116,19 +133,25 @@ Instruções e limites: `docs/runbooks/DEMO_NOTIFICATION.md`.
 
 ## Próxima sequência segura
 
-1. Revogar o webhook exposto, criar outro e guardá-lo interativamente no Keychain conforme o runbook.
-2. Executar a prova Discord com mensagem e PDF exclusivamente fictícios.
-3. Revisar a restrição não comercial do termo DataJud e decidir se o uso interno pretendido é permitido; só então avaliar uma prova de metadados.
-4. Fechar as decisões M0 necessárias ao primeiro conector autenticado e ao heartbeat externo.
-5. Escolher uma rota TJRJ e ambiente autorizado para iniciar M4 com até cinco processos.
-6. Definir autenticação local antes de criar painel ou API acessível por rede.
+1. Confirmar a revogação de todo webhook que apareceu em conversa e revisar participantes/retenção do canal de demonstração.
+2. Obter autorização escrita da LCF para um piloto somente de leitura, com até cinco processos não sigilosos e uma lista fechada de advogados/processos.
+3. Confirmar o primeiro sistema e a URL oficial: TJRJ/PJe, Portal de Serviços/DCP, TRT-1, TRF2/eproc ou outro; esclarecer a sigla "TCRJ".
+4. Definir advogado responsável, operador/autenticador e substituto; preferir perfil de assistente e manter PIN/2FA sob ação humana.
+5. Definir quais movimentos exigem peça, o formato do resumo e do campo "o que foi decidido", além da regra de revisão humana.
+6. Aprovar retenção, backup, sigilo, política de anexos e modelo de resumo; começar sem IA remota até decisão expressa.
+7. Revisar a restrição não comercial do termo DataJud e decidir se o uso interno é permitido antes de qualquer chamada.
+8. Com o M0 registrado, implementar uma única rota autorizada no M4, diretamente no host e sem Selenium.
+
+A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md`. Até a resposta do escritório, o trabalho seguro possível limita-se a fixtures, contratos internos, testes e documentação; não há base para escolher ou ativar um conector real.
 
 ## Última validação conhecida
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
 - Versão 0.5.0: 56 testes e 3 subtestes aprovados com PostgreSQL real; Ruff, formatação e migrações aprovados.
 - Testes cobrem Keychain sanitizado, URL oficial, menções desativadas, PDF válido, limite e multipart Discord sem rede externa.
-- O webhook divulgado em conversa foi tratado como comprometido, não foi testado e não foi gravado em arquivo/Keychain.
+- Em 31/08/2026, a prova externa Discord retornou sucesso e um `provider_id`, usando somente a fixture fixa e `prova_ficticia.pdf`; `real_process_data_used=false`.
+- O webhook novo foi localizado somente pelo serviço/conta do Keychain e seu valor não foi impresso, salvo no repositório ou incluído em `.env`.
+- O webhook divulgado em conversa permaneceu tratado como comprometido e não foi usado; sua revogação no Discord ainda requer confirmação humana.
 - Smoke M2: mesmo evento gerou `created=true` e depois `created=false`; um único job foi executado com sucesso.
 - Smoke M3: responsável e processo fictícios cadastrados; repetição retornou `created=false`, CNJ mascarado, origem `UNKNOWN` e estado `PENDING_INITIAL_CHECK`.
 - O banco local mantém esse único processo fictício e seu job `MONITOR_PROCESS` propositalmente pendente para a próxima fatia.

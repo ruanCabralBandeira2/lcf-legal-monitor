@@ -5,7 +5,10 @@ Nenhum conector real deve ser ativado antes de este checklist ser aprovado por r
 ## Decisões bloqueantes
 
 - [ ] Processo-piloto e sistema atual (DCP, PJe ou eproc), com ambiente de teste autorizado.
+- [ ] Autorização escrita da LCF para monitorar, baixar, armazenar e resumir somente processos de uma lista fechada.
+- [ ] Até cinco processos-piloto preferencialmente não sigilosos, compartilhados por canal seguro e nunca registrados no Git.
 - [ ] Usuário técnico, operador/autenticador primário e substituto.
+- [ ] Sistema inicial e URL oficial confirmados; esclarecer se "TCRJ" significa TJRJ, TRT-1/RJ, TRF2 ou outro serviço.
 - [ ] Base legal, sigilo, perfis de acesso e termos de uso de cada fonte revisados.
 - [ ] Termo do DataJud revisado, inclusive restrição não comercial; compatibilidade do uso pretendido aprovada e aceite registrado antes de qualquer consulta.
 - [ ] SLA interno de detecção e de ação humana por processo.
@@ -14,15 +17,16 @@ Nenhum conector real deve ser ativado antes de este checklist ser aprovado por r
 - [ ] Retenção de documentos, logs e auditoria.
 - [ ] Destino de backup criptografado, RPO, RTO e responsáveis pelo teste de restauração.
 - [ ] Política para resumo: desativado, modelo local ou provedor remoto aprovado.
+- [ ] Template do resumo e do campo "o que foi decidido", com citação da peça/páginas, limiar de confiança e revisão humana definidos.
 - [ ] Tratamento de dados, contratos de operadores e resposta a incidentes aprovados.
 
 ## Prova técnica sem dados jurídicos
 
 - [ ] Webhook divulgado anteriormente revogado no Discord.
 - [ ] Canal Discord privado criado e participantes revisados.
-- [ ] Webhook novo guardado apenas no Keychain e responsável por sua rotação definido.
+- [x] Webhook novo guardado apenas no Keychain; responsável e periodicidade de rotação ainda precisam ser definidos.
 - [ ] Retenção do canal e exclusão de anexos/mensagens de teste definida.
-- [ ] Confirmação de que a prova usará somente a mensagem fixa e nenhum dado processual real.
+- [x] Prova executada em 31/08/2026 somente com mensagem fixa e PDF vazio; o adaptador informou `real_process_data_used=false` e entrega aceita pelo Discord.
 
 Esses itens permitem apenas a prova descrita em `docs/runbooks/DEMO_NOTIFICATION.md`; não aprovam Discord como canal operacional nem liberam conectores reais.
 

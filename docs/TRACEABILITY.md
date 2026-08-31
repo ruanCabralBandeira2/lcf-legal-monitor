@@ -3,6 +3,7 @@
 | Requisito | Implementação atual | Estado |
 |---|---|---|
 | M0 - descoberta e riscos | `docs/M0_CHECKLIST.md` | pendente de decisões humanas |
+| Comunicação não técnica para aprovação do piloto | `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md` | pronta para envio; resposta do escritório pendente |
 | M1 - repositório/configuração | `pyproject.toml`, `.env.example`, `legal_monitor.config` | implementado |
 | M1 - PostgreSQL/migrations | `migrations/001_foundation.sql`, `scripts/migrate.py` | implementado e validado no PostgreSQL 17.11 |
 | M1 - logs estruturados | `legal_monitor.logging` | implementado |
@@ -11,9 +12,11 @@
 | Documento/integração | `legal_monitor.documents` | fatia segura implementada |
 | TJRJ real/router/Playwright | bloqueado por M0 e M4-M5 | não iniciado |
 | DJEN produção | host guard implementado; cliente real no M6 | parcial |
-| Prova de notificação | `legal_monitor.notifications`, `docs/runbooks/DEMO_NOTIFICATION.md` | fake implementado; Discord usa Keychain e PDF fictício, sem dados reais |
+| Prova de notificação | `legal_monitor.notifications`, `docs/runbooks/DEMO_NOTIFICATION.md` | entrega externa Discord validada em 31/08/2026 com segredo no Keychain e PDF fictício; uso jurídico continua bloqueado |
 | Discord/outbox operacional | `docs/backlog/DISCORD_OPERACIONAL.md` | desenho registrado; bloqueado por M0/M8 |
 | Push/WhatsApp/IA operacionais | bloqueados por M0 e marcos M6-M8 | não iniciado |
+| Resumo factual da peça | `legal_monitor.summaries`, `SUMMARY_ENABLED=false`, ADR-006 | contrato, validação de evidência, fallback e fixture implementados; extração/modelo real bloqueados pelo M0/M7 |
+| Campo "o que foi decidido" | `FactualSummaryDraft.decision_result`, `summary-demo` | schema e demonstração fictícia implementados; revisão humana obrigatória |
 | M2 - scheduler/leases/backoff | `legal_monitor.scheduler`, `migrations/002_scheduler_health.sql` | implementado; testes unitários e PostgreSQL |
 | M2 - launchd/heartbeat interno | `ops/launchd`, `docs/runbooks/SCHEDULER.md`, comandos CLI | implementado; instalação automática ainda não ativada |
 | M2 - heartbeat externo | provedor ainda não escolhido no M0 | bloqueado sem esconder a ausência |

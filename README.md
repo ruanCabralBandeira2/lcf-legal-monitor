@@ -16,6 +16,7 @@ Base local e auditável para detectar movimentações relevantes, preservar peç
 - administração local de responsáveis e processos, com número mascarado e auditoria;
 - cadastro transacional que cria estado inicial não-verde e primeira verificação;
 - contrato de notificações, provedor fake e prova Discord com mensagem/PDF fictícios e segredo no Keychain;
+- contrato rastreável de resumo factual, com página/trecho obrigatório e provedor fake sem rede;
 - testes unitários que não precisam de rede nem de dados reais.
 
 Não há Selenium. Também não há automação de WhatsApp Web, quebra de CAPTCHA, captura de 2FA, cálculo de prazo ou envio ao cliente.
@@ -51,6 +52,14 @@ Teste seguro e idempotente do worker, sem acessar fonte externa:
 
 A demonstração local agora inclui um alerta fake em memória. Para comprovar somente a entrega externa, sem processo ou documento real, use o [runbook da prova privada no Discord](docs/runbooks/DEMO_NOTIFICATION.md). Um webhook é suficiente; não é necessário criar um bot. O link fica no Keychain do macOS e a prova envia apenas um PDF vazio criado localmente.
 
+O formato de “o que foi decidido” pode ser demonstrado separadamente, ainda sem ler peça real ou usar IA:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m legal_monitor.cli summary-demo
+```
+
+O resultado sempre exige revisão humana, cita página/trecho e informa `prazo_calculado=false`. Consulte o [runbook da demonstração do resumo](docs/runbooks/SUMMARY_DEMO.md).
+
 O [estudo da API Pública do DataJud](docs/research/DATAJUD_API.md) conclui que ela oferece capa e movimentações, mas não o PDF das peças. O desenho futuro usa DataJud como sinal auxiliar e o conector autorizado PJe/eproc/DCP para o download.
 
 Cadastro administrativo local com dados fictícios:
@@ -77,6 +86,6 @@ A saída mascara o número CNJ. A desativação é lógica, pausa jobs pendentes
 
 ## Limites desta entrega
 
-O repositório não acessa TJRJ, PJe, eproc, DCP, DataJud, DJEN, e-mail, WhatsApp ou serviços de IA. A única saída externa opcional é uma fixture fixa com PDF vazio para um webhook Discord privado, desativada por padrão e proibida em produção. Processo-piloto, usuários, SLAs, canal operacional, retenção, backup e base legal ainda são decisões abertas do M0. O PostgreSQL local contém apenas o esquema inicial e dados de desenvolvimento.
+O repositório não acessa TJRJ, PJe, eproc, DCP, DataJud, DJEN, e-mail, WhatsApp ou serviços de IA. A única saída externa opcional é uma fixture fixa com PDF vazio para um webhook Discord privado, desativada por padrão e proibida em produção. O resumo atual também é apenas uma fixture determinística e não aceita documento real. Processo-piloto, usuários, SLAs, canal operacional, retenção, backup e base legal ainda são decisões abertas do M0. O PostgreSQL local contém apenas o esquema inicial e dados de desenvolvimento.
 
 O estado completo para retomadas está em [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md). A especificação consolidada está versionada em [docs/source](docs/source/especificacao_base_robo_monitoramento_juridico_v4.pdf).

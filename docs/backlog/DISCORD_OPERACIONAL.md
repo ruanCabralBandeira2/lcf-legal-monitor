@@ -2,9 +2,11 @@
 
 O usuário indicou Discord como canal desejado para o piloto. Esta intenção não equivale à aprovação de envio de dados processuais. O adaptador atual continua limitado à fixture fictícia.
 
+Em 31/08/2026, a prova externa foi concluída com sucesso usando o webhook novo no Keychain, mensagem fixa, número mascarado e PDF vazio. Isso comprova somente a entrega técnica. Não comprova acesso a tribunal, monitoramento, download de peça, resumo ou autorização para dados jurídicos reais.
+
 ## Portões antes de código operacional
 
-- webhook exposto revogado e substituto no Keychain;
+- confirmação humana de que todo webhook exposto foi revogado; o substituto já está no Keychain;
 - participantes do canal e acessos administrativos aprovados;
 - avaliação de sigilo, LGPD, termos do Discord, retenção e localização/tratamento dos anexos;
 - advogado destinatário e substituto definidos;

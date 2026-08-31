@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from legal_monitor.config import DJEN_PRODUCTION_URL, ConfigError, Settings
+from legal_monitor.config import (
+    DISCORD_KEYCHAIN_ACCOUNT,
+    DISCORD_KEYCHAIN_SERVICE,
+    DJEN_PRODUCTION_URL,
+    ConfigError,
+    Settings,
+)
 
 
 class SettingsTests(unittest.TestCase):
@@ -20,7 +26,8 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(settings.real_connectors_enabled)
         self.assertFalse(settings.whatsapp_enabled)
         self.assertFalse(settings.discord_demo_enabled)
-        self.assertIsNone(settings.discord_webhook_url)
+        self.assertEqual(settings.discord_webhook_keychain_service, DISCORD_KEYCHAIN_SERVICE)
+        self.assertEqual(settings.discord_webhook_keychain_account, DISCORD_KEYCHAIN_ACCOUNT)
         self.assertFalse(settings.m0_approved)
         self.assertEqual(settings.djen_base_url_prod, DJEN_PRODUCTION_URL)
         self.assertTrue(settings.storage_dir.is_absolute())
@@ -72,10 +79,10 @@ class SettingsTests(unittest.TestCase):
                 load_dotenv=False,
             )
 
-    def test_discord_demo_requires_local_secret(self) -> None:
-        with self.assertRaisesRegex(ConfigError, "DISCORD_WEBHOOK_URL"):
+    def test_discord_rejects_invalid_keychain_identifier(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "KEYCHAIN_SERVICE"):
             Settings.from_env(
-                {"DISCORD_DEMO_ENABLED": "true"},
+                {"DISCORD_WEBHOOK_KEYCHAIN_SERVICE": "invalid\nservice"},
                 root_dir=self.root,
                 load_dotenv=False,
             )
@@ -88,7 +95,6 @@ class SettingsTests(unittest.TestCase):
                     "DATABASE_URL": "postgresql://legal_monitor:secret@localhost/db",
                     "M0_APPROVED": "true",
                     "DISCORD_DEMO_ENABLED": "true",
-                    "DISCORD_WEBHOOK_URL": ("https://discord.com/api/webhooks/123/token-ficticio"),
                 },
                 root_dir=self.root,
                 load_dotenv=False,

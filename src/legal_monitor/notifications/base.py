@@ -1,7 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+
+@dataclass(frozen=True, slots=True)
+class NotificationAttachment:
+    path: Path
+    filename: str
+    mime_type: str = "application/pdf"
+
+    def __post_init__(self) -> None:
+        if not self.filename or self.filename != Path(self.filename).name:
+            raise ValueError("Nome do anexo deve ser simples e não pode conter diretório")
+        if any(char in self.filename for char in ("\r", "\n", '"')):
+            raise ValueError("Nome do anexo contém caractere inseguro")
+        if self.mime_type != "application/pdf":
+            raise ValueError("Nesta fase somente anexos PDF são permitidos")
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +28,7 @@ class NotificationMessage:
     body: str
     correlation_id: str
     demo_only: bool
+    attachments: tuple[NotificationAttachment, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.title.strip() or not self.body.strip() or not self.correlation_id.strip():

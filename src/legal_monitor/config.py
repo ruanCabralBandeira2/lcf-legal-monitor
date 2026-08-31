@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
 DJEN_PRODUCTION_URL = "https://comunicaapi.pje.jus.br/api/v1"
 DJEN_HOMOLOGATION_HOST = "hcomunicaapi.cnj.jus.br"
+DISCORD_KEYCHAIN_SERVICE = "com.lcf.legal-monitor.discord.webhook"
+DISCORD_KEYCHAIN_ACCOUNT = "local-monitor"
 
 
 class ConfigError(ValueError):
@@ -65,7 +67,8 @@ class Settings:
     real_connectors_enabled: bool
     whatsapp_enabled: bool
     discord_demo_enabled: bool
-    discord_webhook_url: str | None = field(repr=False)
+    discord_webhook_keychain_service: str
+    discord_webhook_keychain_account: str
     summary_enabled: bool
     scheduler_lease_seconds: int
     scheduler_batch_size: int
@@ -120,7 +123,12 @@ class Settings:
             real_connectors_enabled=_parse_bool(merged.get("REAL_CONNECTORS_ENABLED")),
             whatsapp_enabled=_parse_bool(merged.get("WHATSAPP_ENABLED")),
             discord_demo_enabled=_parse_bool(merged.get("DISCORD_DEMO_ENABLED")),
-            discord_webhook_url=merged.get("DISCORD_WEBHOOK_URL") or None,
+            discord_webhook_keychain_service=merged.get(
+                "DISCORD_WEBHOOK_KEYCHAIN_SERVICE", DISCORD_KEYCHAIN_SERVICE
+            ),
+            discord_webhook_keychain_account=merged.get(
+                "DISCORD_WEBHOOK_KEYCHAIN_ACCOUNT", DISCORD_KEYCHAIN_ACCOUNT
+            ),
             summary_enabled=_parse_bool(merged.get("SUMMARY_ENABLED")),
             scheduler_lease_seconds=_parse_int(
                 merged,
@@ -189,10 +197,14 @@ class Settings:
             raise ConfigError("Conectores reais exigem M0_APPROVED=true")
         if self.whatsapp_enabled and not self.m0_approved:
             raise ConfigError("WhatsApp exige M0_APPROVED=true")
-        if self.discord_demo_enabled and not self.discord_webhook_url:
-            raise ConfigError("DISCORD_DEMO_ENABLED exige DISCORD_WEBHOOK_URL")
         if self.discord_demo_enabled and self.app_env is AppEnvironment.PRODUCTION:
             raise ConfigError("Discord de demonstração não pode ser ativado em produção")
+        for label, value in (
+            ("DISCORD_WEBHOOK_KEYCHAIN_SERVICE", self.discord_webhook_keychain_service),
+            ("DISCORD_WEBHOOK_KEYCHAIN_ACCOUNT", self.discord_webhook_keychain_account),
+        ):
+            if not value.strip() or len(value) > 128 or any(char in value for char in "\r\n\0"):
+                raise ConfigError(f"{label} possui identificador inválido")
         if self.scheduler_base_backoff_seconds > self.scheduler_max_backoff_seconds:
             raise ConfigError(
                 "SCHEDULER_BASE_BACKOFF_SECONDS não pode exceder SCHEDULER_MAX_BACKOFF_SECONDS"

@@ -1,35 +1,53 @@
 # Prova segura de notificação no Discord
 
-Este procedimento envia somente uma mensagem técnica fixa. Não use processo, cliente, peça, credencial ou outro dado real nesta fase.
+Este procedimento envia somente uma mensagem técnica fixa e um PDF vazio gerado pelo próprio projeto. Não use processo, cliente, peça, credencial ou outro dado real nesta fase.
 
-## Preparar o canal
+## 1. Revogar qualquer webhook exposto
 
-1. Crie um servidor ou canal privado no Discord, acessível apenas às pessoas autorizadas para a prova.
-2. Nas integrações do canal, crie um webhook chamado `LCF Legal Monitor - Demo`.
-3. Copie a URL do webhook, mas não a envie por chat, e-mail, issue ou commit.
-4. Confirme a política de retenção e remova pessoas que não precisem participar do teste.
+Uma URL de webhook contém um token de envio. Se ela apareceu em chat, issue, captura, e-mail ou log, trate-a como comprometida:
 
-Não é necessário criar um bot Discord: um incoming webhook é suficiente para o envio unidirecional.
+1. Abra as integrações do canal no Discord.
+2. Exclua o webhook divulgado.
+3. Crie um webhook novo chamado `LCF Legal Monitor - Demo`.
+4. Não copie o novo link para conversas ou arquivos do projeto.
 
-## Guardar o segredo localmente
+Use um servidor/canal privado, acessível apenas às pessoas autorizadas para a prova. Não é necessário criar um bot Discord: um incoming webhook é suficiente para o envio unidirecional.
 
-Crie o `.env` a partir do exemplo se ele ainda não existir e restrinja sua leitura:
+## 2. Guardar o novo segredo no Keychain
+
+No Terminal local, execute o comando abaixo. A opção `-w` no final fará o macOS pedir o valor de forma interativa, sem gravá-lo no histórico do shell:
 
 ```bash
-cp .env.example .env
-chmod 600 .env
+security add-generic-password \
+  -U \
+  -a local-monitor \
+  -s com.lcf.legal-monitor.discord.webhook \
+  -w
 ```
 
-Edite somente o `.env` local:
+Cole o webhook novo somente no prompt do Keychain. Não use `DISCORD_WEBHOOK_URL` no `.env`.
+
+Para confirmar que o item existe sem revelar o segredo:
+
+```bash
+security find-generic-password \
+  -a local-monitor \
+  -s com.lcf.legal-monitor.discord.webhook
+```
+
+## 3. Ativar somente a prova
+
+No `.env` local, mantenha os identificadores e ative a demonstração:
 
 ```dotenv
 DISCORD_DEMO_ENABLED=true
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/ID/TOKEN
+DISCORD_WEBHOOK_KEYCHAIN_SERVICE=com.lcf.legal-monitor.discord.webhook
+DISCORD_WEBHOOK_KEYCHAIN_ACCOUNT=local-monitor
 ```
 
-O `.env` está ignorado pelo Git. Se a URL aparecer em uma captura, log ou conversa, apague/regere o webhook no Discord imediatamente.
+O `.env` não contém o webhook e permanece ignorado pelo Git.
 
-## Executar a prova
+## 4. Executar
 
 Primeiro valide a configuração e a fatia inteiramente local:
 
@@ -38,14 +56,28 @@ Primeiro valide a configuração e a fatia inteiramente local:
 .venv/bin/legal-monitor demo
 ```
 
-Depois envie a fixture fixa:
+Depois envie a fixture fixa e o PDF vazio:
 
 ```bash
 .venv/bin/legal-monitor notification-demo-discord
 ```
 
-A saída deve indicar `demo_only=true`, `real_process_data_used=false` e o identificador retornado pelo Discord. O conteúdo da mensagem declara explicitamente que não contém dado processual real.
+A saída deve indicar `demo_only=true`, `real_process_data_used=false`, o nome `prova_ficticia.pdf` e o identificador retornado pelo Discord. O adaptador valida assinatura PDF e limita o anexo a 10 MiB, que é o limite padrão documentado pelo Discord em 31/08/2026.
 
-## Encerrar ou evoluir
+## 5. Encerrar ou girar o segredo
 
-Para encerrar a prova, desative `DISCORD_DEMO_ENABLED`, remova o segredo local e exclua/regere o webhook. Não reutilize este adaptador para mensagens jurídicas reais. A escolha do canal operacional, consentimentos, dados permitidos, retenção, outbox e contingência continua sendo uma decisão do M0/M8.
+Desative `DISCORD_DEMO_ENABLED`. Para remover o item do Keychain:
+
+```bash
+security delete-generic-password \
+  -a local-monitor \
+  -s com.lcf.legal-monitor.discord.webhook
+```
+
+Não reutilize este adaptador de demonstração para mensagens jurídicas reais. Participantes, retenção, política de anexos, outbox, idempotência, contingência e base jurídica continuam sendo decisões do M0/M8.
+
+Referências oficiais:
+
+- https://docs.discord.com/developers/platform/webhooks
+- https://docs.discord.com/developers/resources/webhook
+- https://docs.discord.com/developers/reference#uploading-files

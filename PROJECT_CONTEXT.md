@@ -25,7 +25,8 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - M1: fundação local concluída e validada.
 - M2: núcleo de scheduler, launchd e saúde interna concluído; heartbeat externo aguarda decisão do M0.
 - M3: núcleo administrativo local concluído; API/painel em rede adiado até definir autenticação.
-- M4-M9: ainda não iniciados; qualquer fonte real permanece bloqueada pelo M0.
+- Prova de notificação: contrato/fake concluídos e webhook Discord de mensagem fixa preparado, mas sem segredo configurado e sem envio externo.
+- M4-M9: ainda não iniciados; qualquer fonte real e qualquer mensagem jurídica real permanecem bloqueados pelo M0.
 
 ## O que já existe
 
@@ -43,6 +44,8 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - Responsáveis identificados por código estável, sem depender do nome de exibição.
 - Cadastro TJRJ transacional: processo, origem `UNKNOWN`, estado `PENDING_INITIAL_CHECK`, primeiro job e auditoria são confirmados juntos.
 - Listagem administrativa mascara o CNJ; desativação é lógica, pausa jobs e preserva histórico.
+- Provedor fake fecha a demonstração local de movimento, PDF/hash e alerta sem rede.
+- Adaptador Discord aceita somente fixture fixa, desabilita menções, valida o host oficial e não expõe o webhook em erros.
 
 ## Travas vigentes
 
@@ -50,14 +53,17 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - `REAL_CONNECTORS_ENABLED=false`
 - `WHATSAPP_ENABLED=false`
 - `SUMMARY_ENABLED=false`
+- `DISCORD_DEMO_ENABLED=false`
 - Nenhum número processual, peça, nome de parte, e-mail, telefone ou credencial real entra no Git.
 - Selenium, automação de WhatsApp Web, quebra de CAPTCHA e automação/armazenamento de 2FA são proibidos.
 - Playwright só entra no M4, diretamente no host, após sistema/processo-piloto e acesso de teste autorizados.
+- Discord desta fase é apenas prova privada sem dado jurídico, fica proibido em produção e não substitui o outbox/canal operacional.
 - Conteúdo de PDF, HTML e e-mail é dado não confiável, nunca instrução para o robô.
 
 ## Decisões humanas ainda necessárias no M0
 
 - Processo-piloto, sistema inicial do TJRJ e ambiente de teste autorizado.
+- Revisão e aceite expresso do termo da API Pública do DataJud antes de qualquer consumo.
 - Advogado responsável, operador/autenticador primário e substituto.
 - SLA interno por processo/fonte e movimentos relevantes por matéria.
 - Base legal, sigilo, termos de uso, retenção, backup, RPO/RTO e incidente.
@@ -93,17 +99,29 @@ Teste M2 inteiramente fictício:
 .venv/bin/legal-monitor scheduler-run-once
 ```
 
+Prova de notificação:
+
+```bash
+.venv/bin/legal-monitor demo
+# Após criar canal privado e configurar o segredo somente no .env local:
+.venv/bin/legal-monitor notification-demo-discord
+```
+
+Instruções e limites: `docs/runbooks/DEMO_NOTIFICATION.md`.
+
 ## Próxima sequência segura
 
-1. Validar o cadastro M3 com um responsável e processo exclusivamente fictícios.
-2. Fechar as decisões M0 necessárias ao primeiro conector e ao heartbeat externo.
-3. Escolher uma rota TJRJ e ambiente autorizado para iniciar M4 com até cinco processos.
-4. Definir autenticação local antes de criar painel ou API acessível por rede.
+1. Executar a prova Discord com mensagem fixa, se o canal privado e o segredo local forem preparados pelo usuário.
+2. Revisar o termo do DataJud e decidir se a API pública poderá compor uma prova de metadados, sem tratá-la como fonte garantida.
+3. Fechar as decisões M0 necessárias ao primeiro conector autenticado e ao heartbeat externo.
+4. Escolher uma rota TJRJ e ambiente autorizado para iniciar M4 com até cinco processos.
+5. Definir autenticação local antes de criar painel ou API acessível por rede.
 
 ## Última validação conhecida
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
-- 42 testes aprovados, incluindo integração PostgreSQL; Ruff e formatação aprovados.
+- Versão 0.4.0: 49 testes e 3 subtestes aprovados com PostgreSQL real; Ruff e formatação aprovados.
+- Smoke da prova: movimento fictício, PDF/SHA-256 e notificação fake concluídos sem rede; Discord externo permaneceu desativado por ausência intencional do segredo.
 - Smoke M2: mesmo evento gerou `created=true` e depois `created=false`; um único job foi executado com sucesso.
 - Smoke M3: responsável e processo fictícios cadastrados; repetição retornou `created=false`, CNJ mascarado, origem `UNKNOWN` e estado `PENDING_INITIAL_CHECK`.
 - O banco local mantém esse único processo fictício e seu job `MONITOR_PROCESS` propositalmente pendente para a próxima fatia.

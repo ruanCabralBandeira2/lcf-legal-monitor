@@ -7,6 +7,7 @@ Nenhum conector real deve ser ativado antes de este checklist ser aprovado por r
 - [ ] Processo-piloto e sistema atual (DCP, PJe ou eproc), com ambiente de teste autorizado.
 - [ ] Usuário técnico, operador/autenticador primário e substituto.
 - [ ] Base legal, sigilo, perfis de acesso e termos de uso de cada fonte revisados.
+- [ ] Termo de uso da API Pública do DataJud/CNJ revisado e aceito antes de qualquer consulta.
 - [ ] SLA interno de detecção e de ação humana por processo.
 - [ ] Movimentos relevantes e aqueles que exigem tentativa de peça.
 - [ ] Provedor oficial de WhatsApp, consentimento, canal secundário e política de anexos.
@@ -14,6 +15,14 @@ Nenhum conector real deve ser ativado antes de este checklist ser aprovado por r
 - [ ] Destino de backup criptografado, RPO, RTO e responsáveis pelo teste de restauração.
 - [ ] Política para resumo: desativado, modelo local ou provedor remoto aprovado.
 - [ ] Tratamento de dados, contratos de operadores e resposta a incidentes aprovados.
+
+## Prova técnica sem dados jurídicos
+
+- [ ] Canal Discord privado criado e participantes revisados.
+- [ ] Responsável pelo webhook, retenção e rotação do segredo definido.
+- [ ] Confirmação de que a prova usará somente a mensagem fixa e nenhum dado processual real.
+
+Esses três itens permitem apenas a prova descrita em `docs/runbooks/DEMO_NOTIFICATION.md`; não aprovam Discord como canal operacional nem liberam conectores reais.
 
 ## Inventário do Mac observado em 30/08/2026
 

@@ -41,5 +41,21 @@ class MigrationTests(unittest.TestCase):
         self.assertIn("timestamptz", self.sql)
 
 
+class SchedulerMigrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sql = Path("migrations/002_scheduler_health.sql").read_text(encoding="utf-8")
+
+    def test_adds_idempotency_lease_owner_and_attempt_limit(self) -> None:
+        self.assertIn("idempotency_key char(64)", self.sql)
+        self.assertIn("lease_owner text", self.sql)
+        self.assertIn("max_attempts integer", self.sql)
+        self.assertIn("job_idempotency_uq", self.sql)
+
+    def test_adds_scheduler_heartbeat(self) -> None:
+        self.assertRegex(self.sql, r"CREATE TABLE\s+scheduler_heartbeat")
+        self.assertIn("last_seen_at timestamptz", self.sql)
+
+
 if __name__ == "__main__":
     unittest.main()

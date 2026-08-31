@@ -3,6 +3,7 @@
 .venv/
 .venv-*/
 .tools/
+/tmp/
 __pycache__/
 *.py[cod]
 .pytest_cache/

@@ -18,6 +18,9 @@ from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
 from legal_monitor.domain.enums import SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
+from legal_monitor.scheduler.policy import RetryPolicy
+from legal_monitor.scheduler.repository import PostgresSchedulerRepository
+from legal_monitor.scheduler.worker import SchedulerWorker
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -132,6 +135,96 @@ def demo() -> int:
     return 0
 
 
+def _scheduler_components() -> tuple[Settings, PostgresSchedulerRepository, RetryPolicy]:
+    settings = Settings.from_env()
+    repository = PostgresSchedulerRepository(settings.database_url)
+    policy = RetryPolicy(
+        base_seconds=settings.scheduler_base_backoff_seconds,
+        maximum_seconds=settings.scheduler_max_backoff_seconds,
+    )
+    return settings, repository, policy
+
+
+def scheduler_heartbeat(worker_id: str) -> int:
+    _, repository, _ = _scheduler_components()
+    observed_at = datetime.now(UTC)
+    try:
+        repository.record_heartbeat(
+            worker_id=worker_id,
+            seen_at=observed_at,
+            healthy=True,
+            details={"source": "cli"},
+        )
+    except Exception as exc:
+        _emit(
+            {
+                "heartbeat_recorded": False,
+                "error_type": type(exc).__name__,
+            }
+        )
+        return 1
+    _emit(
+        {
+            "heartbeat_recorded": True,
+            "worker_id": worker_id,
+            "observed_at": observed_at.isoformat(),
+        }
+    )
+    return 0
+
+
+def scheduler_health() -> int:
+    settings, repository, _ = _scheduler_components()
+    try:
+        health = repository.health(
+            checked_at=datetime.now(UTC),
+            worker_stale_seconds=settings.worker_stale_seconds,
+        )
+    except Exception as exc:
+        _emit(
+            {
+                "database_accessible": False,
+                "platform_alive": False,
+                "error_type": type(exc).__name__,
+            }
+        )
+        return 1
+    _emit(health.as_dict())
+    return 0 if health.platform_alive else 1
+
+
+def scheduler_enqueue_healthcheck(idempotency_scope: str) -> int:
+    settings, repository, _ = _scheduler_components()
+    enqueued = repository.enqueue(
+        job_type="SYSTEM_HEALTHCHECK",
+        due_at=datetime.now(UTC),
+        idempotency_scope=idempotency_scope,
+        max_attempts=settings.scheduler_max_attempts,
+    )
+    _emit(
+        {
+            "job_id": str(enqueued.id),
+            "correlation_id": str(enqueued.correlation_id),
+            "created": enqueued.created,
+        }
+    )
+    return 0
+
+
+def scheduler_run_once(worker_id: str) -> int:
+    settings, repository, policy = _scheduler_components()
+    worker = SchedulerWorker(
+        repository=repository,
+        worker_id=worker_id,
+        handlers={"SYSTEM_HEALTHCHECK": lambda lease: None},
+        retry_policy=policy,
+        lease_seconds=settings.scheduler_lease_seconds,
+        batch_size=settings.scheduler_batch_size,
+    )
+    _emit(worker.run_once().as_dict())
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="legal-monitor")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -139,6 +232,22 @@ def build_parser() -> argparse.ArgumentParser:
     cnj_parser = subcommands.add_parser("validate-cnj", help="valida um número CNJ")
     cnj_parser.add_argument("number")
     subcommands.add_parser("demo", help="executa fatia vertical fictícia sem rede")
+    heartbeat_parser = subcommands.add_parser(
+        "scheduler-heartbeat", help="registra o sinal interno do worker no PostgreSQL"
+    )
+    heartbeat_parser.add_argument("--worker-id", default="local-worker")
+    subcommands.add_parser(
+        "scheduler-health", help="mostra saúde da agenda sem confundir heartbeat e processos"
+    )
+    enqueue_parser = subcommands.add_parser(
+        "scheduler-enqueue-healthcheck",
+        help="agenda um job fictício e idempotente para teste local",
+    )
+    enqueue_parser.add_argument("--key", required=True)
+    worker_parser = subcommands.add_parser(
+        "scheduler-run-once", help="executa um lote vencido e encerra"
+    )
+    worker_parser.add_argument("--worker-id", default="local-worker")
     return parser
 
 
@@ -150,6 +259,14 @@ def main(argv: list[str] | None = None) -> int:
         return validate_cnj(args.number)
     if args.command == "demo":
         return demo()
+    if args.command == "scheduler-heartbeat":
+        return scheduler_heartbeat(args.worker_id)
+    if args.command == "scheduler-health":
+        return scheduler_health()
+    if args.command == "scheduler-enqueue-healthcheck":
+        return scheduler_enqueue_healthcheck(args.key)
+    if args.command == "scheduler-run-once":
+        return scheduler_run_once(args.worker_id)
     return 2
 
 

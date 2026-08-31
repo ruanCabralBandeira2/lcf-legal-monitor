@@ -20,6 +20,12 @@ from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
 from legal_monitor.domain.enums import Sensitivity, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
+from legal_monitor.notifications.base import NotificationMessage
+from legal_monitor.notifications.discord import (
+    DiscordNotificationError,
+    DiscordWebhookNotifier,
+)
+from legal_monitor.notifications.fake import FakeNotifier
 from legal_monitor.scheduler.policy import RetryPolicy
 from legal_monitor.scheduler.repository import PostgresSchedulerRepository
 from legal_monitor.scheduler.worker import SchedulerWorker
@@ -50,6 +56,7 @@ def doctor() -> int:
                 "storage_writable": True,
                 "real_connectors_enabled": settings.real_connectors_enabled,
                 "whatsapp_enabled": settings.whatsapp_enabled,
+                "discord_demo_enabled": settings.discord_demo_enabled,
                 "m0_approved": settings.m0_approved,
             }
         )
@@ -120,6 +127,18 @@ def demo() -> int:
             movement_type=movement.type_normalized,
             observed_at=observed_at,
         )
+        notifier = FakeNotifier()
+        receipt = notifier.send(
+            NotificationMessage(
+                title="LCF Legal Monitor — demonstração segura",
+                body=(
+                    f"Movimentação fictícia detectada no processo {cnj.masked()}. "
+                    "Nenhum dado real ou acesso externo foi utilizado."
+                ),
+                correlation_id="demo-001",
+                demo_only=True,
+            )
+        )
         _emit(
             {
                 "safe_demo": True,
@@ -129,11 +148,47 @@ def demo() -> int:
                 "document_sha256": record.sha256,
                 "page_count": record.page_count,
                 "stored": record.storage_path.exists(),
+                "notification": {
+                    "accepted": receipt.accepted,
+                    "channel": receipt.channel,
+                    "provider_id": receipt.provider_id,
+                },
                 "production_storage_untouched": (
                     str(settings.storage_dir) not in str(record.storage_path)
                 ),
             }
         )
+    return 0
+
+
+def notification_demo_discord() -> int:
+    settings = Settings.from_env()
+    if not settings.discord_demo_enabled or settings.discord_webhook_url is None:
+        raise ConfigError(
+            "Demonstração Discord desativada; configure DISCORD_DEMO_ENABLED=true e "
+            "DISCORD_WEBHOOK_URL somente no .env local"
+        )
+    notifier = DiscordWebhookNotifier(settings.discord_webhook_url)
+    receipt = notifier.send(
+        NotificationMessage(
+            title="LCF Legal Monitor — prova técnica",
+            body=(
+                "Alerta de demonstração recebido com sucesso. Esta mensagem não contém "
+                "processo, cliente, documento ou credencial real."
+            ),
+            correlation_id="discord-demo-v1",
+            demo_only=True,
+        )
+    )
+    _emit(
+        {
+            "ok": True,
+            "demo_only": True,
+            "real_process_data_used": False,
+            "channel": receipt.channel,
+            "provider_id": receipt.provider_id,
+        }
+    )
     return 0
 
 
@@ -284,6 +339,10 @@ def build_parser() -> argparse.ArgumentParser:
     cnj_parser = subcommands.add_parser("validate-cnj", help="valida um número CNJ")
     cnj_parser.add_argument("number")
     subcommands.add_parser("demo", help="executa fatia vertical fictícia sem rede")
+    subcommands.add_parser(
+        "notification-demo-discord",
+        help="envia uma fixture fixa, sem dado processual, a um webhook Discord privado",
+    )
     heartbeat_parser = subcommands.add_parser(
         "scheduler-heartbeat", help="registra o sinal interno do worker no PostgreSQL"
     )
@@ -338,6 +397,8 @@ def main(argv: list[str] | None = None) -> int:
             return validate_cnj(args.number)
         if args.command == "demo":
             return demo()
+        if args.command == "notification-demo-discord":
+            return notification_demo_discord()
         if args.command == "scheduler-heartbeat":
             return scheduler_heartbeat(args.worker_id)
         if args.command == "scheduler-health":
@@ -354,7 +415,13 @@ def main(argv: list[str] | None = None) -> int:
             return admin_list_processes(args.include_inactive)
         if args.command == "admin-deactivate-process":
             return admin_deactivate_process(args.number, args.actor)
-    except (AdminRepositoryError, AdminValidationError, InvalidCnjNumber) as exc:
+    except (
+        AdminRepositoryError,
+        AdminValidationError,
+        ConfigError,
+        DiscordNotificationError,
+        InvalidCnjNumber,
+    ) as exc:
         _emit({"ok": False, "error_type": type(exc).__name__, "error": str(exc)})
         return 1
     return 2

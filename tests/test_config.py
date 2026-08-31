@@ -19,6 +19,8 @@ class SettingsTests(unittest.TestCase):
         settings = Settings.from_env({}, root_dir=self.root, load_dotenv=False)
         self.assertFalse(settings.real_connectors_enabled)
         self.assertFalse(settings.whatsapp_enabled)
+        self.assertFalse(settings.discord_demo_enabled)
+        self.assertIsNone(settings.discord_webhook_url)
         self.assertFalse(settings.m0_approved)
         self.assertEqual(settings.djen_base_url_prod, DJEN_PRODUCTION_URL)
         self.assertTrue(settings.storage_dir.is_absolute())
@@ -65,6 +67,28 @@ class SettingsTests(unittest.TestCase):
                 {
                     "SCHEDULER_BASE_BACKOFF_SECONDS": "120",
                     "SCHEDULER_MAX_BACKOFF_SECONDS": "60",
+                },
+                root_dir=self.root,
+                load_dotenv=False,
+            )
+
+    def test_discord_demo_requires_local_secret(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "DISCORD_WEBHOOK_URL"):
+            Settings.from_env(
+                {"DISCORD_DEMO_ENABLED": "true"},
+                root_dir=self.root,
+                load_dotenv=False,
+            )
+
+    def test_discord_demo_is_forbidden_in_production(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "Discord de demonstração"):
+            Settings.from_env(
+                {
+                    "APP_ENV": "production",
+                    "DATABASE_URL": "postgresql://legal_monitor:secret@localhost/db",
+                    "M0_APPROVED": "true",
+                    "DISCORD_DEMO_ENABLED": "true",
+                    "DISCORD_WEBHOOK_URL": ("https://discord.com/api/webhooks/123/token-ficticio"),
                 },
                 root_dir=self.root,
                 load_dotenv=False,

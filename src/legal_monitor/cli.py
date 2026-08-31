@@ -20,12 +20,13 @@ from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
 from legal_monitor.domain.enums import Sensitivity, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
-from legal_monitor.notifications.base import NotificationMessage
+from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
 from legal_monitor.notifications.discord import (
     DiscordNotificationError,
     DiscordWebhookNotifier,
 )
 from legal_monitor.notifications.fake import FakeNotifier
+from legal_monitor.notifications.keychain import KeychainSecretError, MacOSKeychainSecretProvider
 from legal_monitor.scheduler.policy import RetryPolicy
 from legal_monitor.scheduler.repository import PostgresSchedulerRepository
 from legal_monitor.scheduler.worker import SchedulerWorker
@@ -57,6 +58,7 @@ def doctor() -> int:
                 "real_connectors_enabled": settings.real_connectors_enabled,
                 "whatsapp_enabled": settings.whatsapp_enabled,
                 "discord_demo_enabled": settings.discord_demo_enabled,
+                "discord_secret_store": "macos-keychain",
                 "m0_approved": settings.m0_approved,
             }
         )
@@ -163,23 +165,40 @@ def demo() -> int:
 
 def notification_demo_discord() -> int:
     settings = Settings.from_env()
-    if not settings.discord_demo_enabled or settings.discord_webhook_url is None:
+    if not settings.discord_demo_enabled:
         raise ConfigError(
-            "Demonstração Discord desativada; configure DISCORD_DEMO_ENABLED=true e "
-            "DISCORD_WEBHOOK_URL somente no .env local"
+            "Demonstração Discord desativada; configure DISCORD_DEMO_ENABLED=true depois "
+            "de guardar um webhook novo no Keychain"
         )
-    notifier = DiscordWebhookNotifier(settings.discord_webhook_url)
-    receipt = notifier.send(
-        NotificationMessage(
-            title="LCF Legal Monitor — prova técnica",
-            body=(
-                "Alerta de demonstração recebido com sucesso. Esta mensagem não contém "
-                "processo, cliente, documento ou credencial real."
-            ),
-            correlation_id="discord-demo-v1",
-            demo_only=True,
-        )
+    webhook_url = MacOSKeychainSecretProvider().get(
+        service=settings.discord_webhook_keychain_service,
+        account=settings.discord_webhook_keychain_account,
     )
+    with tempfile.TemporaryDirectory(prefix="legal-monitor-discord-demo-") as temporary:
+        notifier = DiscordWebhookNotifier(webhook_url, allowed_attachment_root=temporary)
+        attachment_path = Path(temporary) / "prova_ficticia.pdf"
+        attachment_path.write_bytes(_example_pdf())
+        attachment_path.chmod(0o600)
+        receipt = notifier.send(
+            NotificationMessage(
+                title="LCF Legal Monitor — prova técnica",
+                body=(
+                    "Processo: *******-**.2026.*.**.****\n"
+                    "Origem: TJRJ / FONTE FICTÍCIA\n"
+                    "Movimentação: decisão proferida (fixture)\n"
+                    "Peça: prova_ficticia.pdf\n"
+                    "Atenção: demonstração sem dado real; prazo não calculado."
+                ),
+                correlation_id="discord-demo-v2",
+                demo_only=True,
+                attachments=(
+                    NotificationAttachment(
+                        path=attachment_path,
+                        filename="prova_ficticia.pdf",
+                    ),
+                ),
+            )
+        )
     _emit(
         {
             "ok": True,
@@ -187,6 +206,7 @@ def notification_demo_discord() -> int:
             "real_process_data_used": False,
             "channel": receipt.channel,
             "provider_id": receipt.provider_id,
+            "attachment": "prova_ficticia.pdf",
         }
     )
     return 0
@@ -421,6 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         ConfigError,
         DiscordNotificationError,
         InvalidCnjNumber,
+        KeychainSecretError,
     ) as exc:
         _emit({"ok": False, "error_type": type(exc).__name__, "error": str(exc)})
         return 1

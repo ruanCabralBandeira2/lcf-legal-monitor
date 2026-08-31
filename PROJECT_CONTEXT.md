@@ -1,6 +1,6 @@
 # Contexto atual do projeto
 
-Atualizado em 30/08/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
+Atualizado em 31/08/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
 
 ## Missão
 
@@ -24,7 +24,8 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - M0: parcialmente aberto por depender de decisões do escritório.
 - M1: fundação local concluída e validada.
 - M2: núcleo de scheduler, launchd e saúde interna concluído; heartbeat externo aguarda decisão do M0.
-- M3-M9: ainda não iniciados como marcos; existem componentes seguros antecipados de domínio, conector fake e documentos.
+- M3: núcleo administrativo local concluído; API/painel em rede adiado até definir autenticação.
+- M4-M9: ainda não iniciados; qualquer fonte real permanece bloqueada pelo M0.
 
 ## O que já existe
 
@@ -39,6 +40,9 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - CAPTCHA, 2FA, divergência, migração e worker sem handler pausam o job; não há retentativa cega.
 - Heartbeat interno do worker e consulta de saúde que diferencia plataforma viva de processos atrasados/sem sucesso.
 - CI com PostgreSQL real para migrações e testes de integração.
+- Responsáveis identificados por código estável, sem depender do nome de exibição.
+- Cadastro TJRJ transacional: processo, origem `UNKNOWN`, estado `PENDING_INITIAL_CHECK`, primeiro job e auditoria são confirmados juntos.
+- Listagem administrativa mascara o CNJ; desativação é lógica, pausa jobs e preserva histórico.
 
 ## Travas vigentes
 
@@ -77,6 +81,7 @@ PYTHONPATH=src .venv/bin/python scripts/migrate.py
 .venv/bin/legal-monitor doctor
 .venv/bin/legal-monitor scheduler-heartbeat
 .venv/bin/legal-monitor scheduler-health
+.venv/bin/legal-monitor admin-list-processes
 .venv/bin/ruff check .
 .venv/bin/python -m pytest
 ```
@@ -90,16 +95,19 @@ Teste M2 inteiramente fictício:
 
 ## Próxima sequência segura
 
-1. M3: repositórios de processos/responsáveis, cadastro local/API mínima, estados e auditoria.
+1. Validar o cadastro M3 com um responsável e processo exclusivamente fictícios.
 2. Fechar as decisões M0 necessárias ao primeiro conector e ao heartbeat externo.
-3. Só então escolher uma rota TJRJ e iniciar M4 com até cinco processos autorizados.
+3. Escolher uma rota TJRJ e ambiente autorizado para iniciar M4 com até cinco processos.
+4. Definir autenticação local antes de criar painel ou API acessível por rede.
 
 ## Última validação conhecida
 
-- Migrações `001` e `002` aplicadas no PostgreSQL 17.11.
-- 35 testes aprovados, incluindo integração PostgreSQL; Ruff e formatação aprovados.
+- Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
+- 42 testes aprovados, incluindo integração PostgreSQL; Ruff e formatação aprovados.
 - Smoke M2: mesmo evento gerou `created=true` e depois `created=false`; um único job foi executado com sucesso.
-- Saúde após o smoke: banco acessível, worker recente, zero job vencido/em execução/falhado e `platform_alive=true`.
+- Smoke M3: responsável e processo fictícios cadastrados; repetição retornou `created=false`, CNJ mascarado, origem `UNKNOWN` e estado `PENDING_INITIAL_CHECK`.
+- O banco local mantém esse único processo fictício e seu job `MONITOR_PROCESS` propositalmente pendente para a próxima fatia.
+- Saúde após heartbeat manual: `platform_alive=true`, mas `jobs_due=1`, `processes_overdue=1` e `processes_without_success=1`; a pendência não foi escondida.
 
 ## Protocolo de retomada
 

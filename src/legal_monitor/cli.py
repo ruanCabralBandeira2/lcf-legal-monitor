@@ -12,11 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from legal_monitor import __version__
+from legal_monitor.admin.repository import AdminRepositoryError, PostgresAdminRepository
+from legal_monitor.admin.service import AdminService, AdminValidationError
 from legal_monitor.config import ConfigError, Settings
 from legal_monitor.connectors.fake import FakeConnector
 from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
-from legal_monitor.domain.enums import SourceSystem
+from legal_monitor.domain.enums import Sensitivity, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
 from legal_monitor.scheduler.policy import RetryPolicy
 from legal_monitor.scheduler.repository import PostgresSchedulerRepository
@@ -225,6 +227,56 @@ def scheduler_run_once(worker_id: str) -> int:
     return 0
 
 
+def _admin_service() -> AdminService:
+    settings = Settings.from_env()
+    return AdminService(
+        PostgresAdminRepository(settings.database_url),
+        scheduler_max_attempts=settings.scheduler_max_attempts,
+    )
+
+
+def admin_add_lawyer(code: str, name: str, actor: str) -> int:
+    record = _admin_service().register_lawyer(
+        reference_code=code,
+        display_name=name,
+        actor_id=actor,
+    )
+    _emit({"ok": True, "lawyer": record.as_dict()})
+    return 0
+
+
+def admin_add_process(number: str, lawyer: str, sensitivity: str, actor: str) -> int:
+    record = _admin_service().register_process(
+        cnj_value=number,
+        lawyer_reference=lawyer,
+        sensitivity=Sensitivity(sensitivity),
+        actor_id=actor,
+    )
+    _emit({"ok": True, "process": record.as_dict()})
+    return 0
+
+
+def admin_list_processes(include_inactive: bool) -> int:
+    records = _admin_service().list_processes(include_inactive=include_inactive)
+    _emit(
+        {
+            "ok": True,
+            "count": len(records),
+            "processes": [record.as_dict() for record in records],
+        }
+    )
+    return 0
+
+
+def admin_deactivate_process(number: str, actor: str) -> int:
+    result = _admin_service().deactivate_process(
+        cnj_value=number,
+        actor_id=actor,
+    )
+    _emit({"ok": True, "result": result.as_dict()})
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="legal-monitor")
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -248,25 +300,63 @@ def build_parser() -> argparse.ArgumentParser:
         "scheduler-run-once", help="executa um lote vencido e encerra"
     )
     worker_parser.add_argument("--worker-id", default="local-worker")
+    lawyer_parser = subcommands.add_parser(
+        "admin-add-lawyer", help="cadastra um responsável local com trilha de auditoria"
+    )
+    lawyer_parser.add_argument("--code", required=True)
+    lawyer_parser.add_argument("--name", required=True)
+    lawyer_parser.add_argument("--actor", default="local-admin")
+    process_parser = subcommands.add_parser(
+        "admin-add-process", help="cadastra processo TJRJ e agenda a primeira verificação"
+    )
+    process_parser.add_argument("number")
+    process_parser.add_argument("--lawyer", required=True)
+    process_parser.add_argument(
+        "--sensitivity",
+        choices=[value.value for value in Sensitivity],
+        default=Sensitivity.CONFIDENTIAL.value,
+    )
+    process_parser.add_argument("--actor", default="local-admin")
+    list_parser = subcommands.add_parser(
+        "admin-list-processes", help="lista processos com número mascarado e estado explícito"
+    )
+    list_parser.add_argument("--include-inactive", action="store_true")
+    deactivate_parser = subcommands.add_parser(
+        "admin-deactivate-process", help="desativa processo, agenda e estado sem apagar histórico"
+    )
+    deactivate_parser.add_argument("number")
+    deactivate_parser.add_argument("--actor", default="local-admin")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.command == "doctor":
-        return doctor()
-    if args.command == "validate-cnj":
-        return validate_cnj(args.number)
-    if args.command == "demo":
-        return demo()
-    if args.command == "scheduler-heartbeat":
-        return scheduler_heartbeat(args.worker_id)
-    if args.command == "scheduler-health":
-        return scheduler_health()
-    if args.command == "scheduler-enqueue-healthcheck":
-        return scheduler_enqueue_healthcheck(args.key)
-    if args.command == "scheduler-run-once":
-        return scheduler_run_once(args.worker_id)
+    try:
+        if args.command == "doctor":
+            return doctor()
+        if args.command == "validate-cnj":
+            return validate_cnj(args.number)
+        if args.command == "demo":
+            return demo()
+        if args.command == "scheduler-heartbeat":
+            return scheduler_heartbeat(args.worker_id)
+        if args.command == "scheduler-health":
+            return scheduler_health()
+        if args.command == "scheduler-enqueue-healthcheck":
+            return scheduler_enqueue_healthcheck(args.key)
+        if args.command == "scheduler-run-once":
+            return scheduler_run_once(args.worker_id)
+        if args.command == "admin-add-lawyer":
+            return admin_add_lawyer(args.code, args.name, args.actor)
+        if args.command == "admin-add-process":
+            return admin_add_process(args.number, args.lawyer, args.sensitivity, args.actor)
+        if args.command == "admin-list-processes":
+            return admin_list_processes(args.include_inactive)
+        if args.command == "admin-deactivate-process":
+            return admin_deactivate_process(args.number, args.actor)
+    except (AdminRepositoryError, AdminValidationError, InvalidCnjNumber) as exc:
+        _emit({"ok": False, "error_type": type(exc).__name__, "error": str(exc)})
+        return 1
     return 2
 
 

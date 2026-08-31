@@ -23,6 +23,63 @@ def _require_aware(value: datetime, field: str) -> None:
         raise ValueError(f"{field} precisa conter fuso horário")
 
 
+def enqueue_job(
+    connection: psycopg.Connection[Any],
+    *,
+    job_type: str,
+    due_at: datetime,
+    idempotency_scope: str,
+    process_id: UUID | None = None,
+    max_attempts: int = 4,
+    correlation_id: UUID | None = None,
+) -> EnqueuedJob:
+    """Agenda um job na transação recebida, permitindo composição atômica por casos de uso."""
+
+    _require_aware(due_at, "due_at")
+    if not job_type.strip():
+        raise ValueError("job_type não pode ser vazio")
+    if not idempotency_scope.strip():
+        raise ValueError("idempotency_scope não pode ser vazio")
+    if max_attempts < 1:
+        raise ValueError("max_attempts deve ser positivo")
+
+    idempotency_key = hashlib.sha256(
+        "\x1f".join((job_type, str(process_id or ""), idempotency_scope)).encode()
+    ).hexdigest()
+    job_id = uuid4()
+    effective_correlation_id = correlation_id or uuid4()
+    row = connection.execute(
+        """
+        INSERT INTO job (
+            id, type, process_id, due_at, status, correlation_id,
+            idempotency_key, max_attempts
+        )
+        VALUES (%s, %s, %s, %s, 'PENDING', %s, %s, %s)
+        ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
+        DO NOTHING
+        RETURNING id, correlation_id
+        """,
+        (
+            job_id,
+            job_type.strip(),
+            process_id,
+            due_at,
+            effective_correlation_id,
+            idempotency_key,
+            max_attempts,
+        ),
+    ).fetchone()
+    if row is not None:
+        return EnqueuedJob(row["id"], row["correlation_id"], idempotency_key, True)
+    existing = connection.execute(
+        "SELECT id, correlation_id FROM job WHERE idempotency_key = %s",
+        (idempotency_key,),
+    ).fetchone()
+    if existing is None:
+        raise RuntimeError("Job idempotente não foi criado nem localizado")
+    return EnqueuedJob(existing["id"], existing["correlation_id"], idempotency_key, False)
+
+
 class PostgresSchedulerRepository:
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url.replace("postgresql+psycopg://", "postgresql://", 1)
@@ -37,50 +94,16 @@ class PostgresSchedulerRepository:
         max_attempts: int = 4,
         correlation_id: UUID | None = None,
     ) -> EnqueuedJob:
-        _require_aware(due_at, "due_at")
-        if not job_type.strip():
-            raise ValueError("job_type não pode ser vazio")
-        if not idempotency_scope.strip():
-            raise ValueError("idempotency_scope não pode ser vazio")
-        if max_attempts < 1:
-            raise ValueError("max_attempts deve ser positivo")
-
-        idempotency_key = hashlib.sha256(
-            "\x1f".join((job_type, str(process_id or ""), idempotency_scope)).encode()
-        ).hexdigest()
-        job_id = uuid4()
-        effective_correlation_id = correlation_id or uuid4()
         with psycopg.connect(self._database_url, row_factory=dict_row) as connection:
-            row = connection.execute(
-                """
-                INSERT INTO job (
-                    id, type, process_id, due_at, status, correlation_id,
-                    idempotency_key, max_attempts
-                )
-                VALUES (%s, %s, %s, %s, 'PENDING', %s, %s, %s)
-                ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL
-                DO NOTHING
-                RETURNING id, correlation_id
-                """,
-                (
-                    job_id,
-                    job_type.strip(),
-                    process_id,
-                    due_at,
-                    effective_correlation_id,
-                    idempotency_key,
-                    max_attempts,
-                ),
-            ).fetchone()
-            if row is not None:
-                return EnqueuedJob(row["id"], row["correlation_id"], idempotency_key, True)
-            existing = connection.execute(
-                "SELECT id, correlation_id FROM job WHERE idempotency_key = %s",
-                (idempotency_key,),
-            ).fetchone()
-            if existing is None:
-                raise RuntimeError("Job idempotente não foi criado nem localizado")
-            return EnqueuedJob(existing["id"], existing["correlation_id"], idempotency_key, False)
+            return enqueue_job(
+                connection,
+                job_type=job_type,
+                due_at=due_at,
+                idempotency_scope=idempotency_scope,
+                process_id=process_id,
+                max_attempts=max_attempts,
+                correlation_id=correlation_id,
+            )
 
     def claim_due(
         self,
@@ -89,12 +112,16 @@ class PostgresSchedulerRepository:
         now: datetime,
         lease_seconds: int,
         limit: int,
+        job_types: tuple[str, ...],
     ) -> tuple[JobLease, ...]:
         _require_aware(now, "now")
         if not worker_id.strip():
             raise ValueError("worker_id não pode ser vazio")
         if lease_seconds < 1 or limit < 1:
             raise ValueError("lease_seconds e limit devem ser positivos")
+        normalized_types = tuple(value.strip() for value in job_types if value.strip())
+        if not normalized_types:
+            raise ValueError("job_types deve conter ao menos um tipo")
 
         lease_until = now + timedelta(seconds=lease_seconds)
         claimed: list[JobLease] = []
@@ -104,13 +131,16 @@ class PostgresSchedulerRepository:
                 SELECT id, type, process_id, due_at, attempt, max_attempts,
                        correlation_id, status
                 FROM job
-                WHERE (status = 'PENDING' AND due_at <= %s)
-                   OR (status IN ('LEASED', 'RUNNING') AND lease_until <= %s)
+                WHERE type = ANY(%s)
+                  AND (
+                      (status = 'PENDING' AND due_at <= %s)
+                      OR (status IN ('LEASED', 'RUNNING') AND lease_until <= %s)
+                  )
                 ORDER BY due_at, created_at, id
                 FOR UPDATE SKIP LOCKED
                 LIMIT %s
                 """,
-                (now, now, limit),
+                (list(normalized_types), now, now, limit),
             ).fetchall()
             for row in rows:
                 previous_attempt = row["attempt"]

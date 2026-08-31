@@ -47,6 +47,12 @@ class PostgresSchedulerIntegrationTests(unittest.TestCase):
 
     def test_enqueue_is_idempotent_and_claim_is_exclusive(self) -> None:
         first = self._enqueue(f"integration-idempotency-{self.now.isoformat()}")
+        unrelated = self.repository.enqueue(
+            job_type="OTHER_WORKER_JOB",
+            due_at=self.now,
+            idempotency_scope=f"integration-other-{self.now.isoformat()}",
+        )
+        self.job_ids.add(unrelated.id)
         repeated = self.repository.enqueue(
             job_type="SYSTEM_HEALTHCHECK",
             due_at=self.now,
@@ -57,25 +63,47 @@ class PostgresSchedulerIntegrationTests(unittest.TestCase):
         self.assertEqual(first.id, repeated.id)
 
         leases = self.repository.claim_due(
-            worker_id="integration-a", now=self.now, lease_seconds=60, limit=10
+            worker_id="integration-a",
+            now=self.now,
+            lease_seconds=60,
+            limit=10,
+            job_types=("SYSTEM_HEALTHCHECK",),
         )
         self.assertEqual(len(leases), 1)
         competing = self.repository.claim_due(
-            worker_id="integration-b", now=self.now, lease_seconds=60, limit=10
+            worker_id="integration-b",
+            now=self.now,
+            lease_seconds=60,
+            limit=10,
+            job_types=("SYSTEM_HEALTHCHECK",),
         )
         self.assertEqual(competing, ())
         self.repository.complete(leases[0], completed_at=self.now + timedelta(seconds=1))
+        other_lease = self.repository.claim_due(
+            worker_id="integration-other",
+            now=self.now,
+            lease_seconds=60,
+            limit=10,
+            job_types=("OTHER_WORKER_JOB",),
+        )
+        self.assertEqual([lease.id for lease in other_lease], [unrelated.id])
+        self.repository.complete(other_lease[0], completed_at=self.now + timedelta(seconds=1))
 
     def test_expired_lease_is_reclaimed_and_old_owner_cannot_complete(self) -> None:
         self._enqueue(f"integration-expired-{self.now.isoformat()}")
         first = self.repository.claim_due(
-            worker_id="integration-old", now=self.now, lease_seconds=1, limit=1
+            worker_id="integration-old",
+            now=self.now,
+            lease_seconds=1,
+            limit=1,
+            job_types=("SYSTEM_HEALTHCHECK",),
         )[0]
         second = self.repository.claim_due(
             worker_id="integration-new",
             now=self.now + timedelta(seconds=2),
             lease_seconds=60,
             limit=1,
+            job_types=("SYSTEM_HEALTHCHECK",),
         )[0]
         self.assertEqual(second.attempt, 2)
         with self.assertRaises(LostLeaseError):
@@ -85,7 +113,11 @@ class PostgresSchedulerIntegrationTests(unittest.TestCase):
     def test_failure_is_rescheduled_and_health_separates_worker_from_processes(self) -> None:
         self._enqueue(f"integration-retry-{self.now.isoformat()}")
         lease = self.repository.claim_due(
-            worker_id="integration-retry", now=self.now, lease_seconds=60, limit=1
+            worker_id="integration-retry",
+            now=self.now,
+            lease_seconds=60,
+            limit=1,
+            job_types=("SYSTEM_HEALTHCHECK",),
         )[0]
         status = self.repository.fail(
             lease,

@@ -18,6 +18,7 @@ class SessionState(StrEnum):
 
 
 class MonitorStatus(StrEnum):
+    PENDING_INITIAL_CHECK = "PENDING_INITIAL_CHECK"
     ACTIVE_HEALTHY = "ACTIVE_HEALTHY"
     RETRY_SCHEDULED = "RETRY_SCHEDULED"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -42,6 +43,7 @@ class ErrorCode(StrEnum):
     LEASE_EXPIRED = "LEASE_EXPIRED"
     WORKER_MISCONFIGURED = "WORKER_MISCONFIGURED"
     UNEXPECTED_ERROR = "UNEXPECTED_ERROR"
+    PROCESS_DISABLED = "PROCESS_DISABLED"
 
 
 class JobStatus(StrEnum):
@@ -58,3 +60,16 @@ class JobAttemptStatus(StrEnum):
     SUCCEEDED = "SUCCEEDED"
     FAILED = "FAILED"
     BLOCKED = "BLOCKED"
+
+
+class Sensitivity(StrEnum):
+    INTERNAL = "INTERNAL"
+    CONFIDENTIAL = "CONFIDENTIAL"
+    RESTRICTED = "RESTRICTED"
+
+
+class ActorType(StrEnum):
+    SYSTEM = "SYSTEM"
+    ADMIN = "ADMIN"
+    OPERATOR = "OPERATOR"
+    LAWYER = "LAWYER"

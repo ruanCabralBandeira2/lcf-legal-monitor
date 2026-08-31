@@ -57,5 +57,18 @@ class SchedulerMigrationTests(unittest.TestCase):
         self.assertIn("last_seen_at timestamptz", self.sql)
 
 
+class AdminMigrationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.sql = Path("migrations/003_admin_registration.sql").read_text(encoding="utf-8")
+
+    def test_adds_stable_lawyer_reference(self) -> None:
+        self.assertIn("reference_code text", self.sql)
+        self.assertIn("lawyer_reference_code_uq", self.sql)
+
+    def test_new_process_never_starts_as_healthy(self) -> None:
+        self.assertIn("PENDING_INITIAL_CHECK", self.sql)
+
+
 if __name__ == "__main__":
     unittest.main()

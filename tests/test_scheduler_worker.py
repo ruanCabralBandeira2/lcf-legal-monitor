@@ -44,8 +44,9 @@ class MemoryRepository:
         now: datetime,
         lease_seconds: int,
         limit: int,
+        job_types: tuple[str, ...],
     ) -> tuple[JobLease, ...]:
-        del worker_id, now, lease_seconds, limit
+        del worker_id, now, lease_seconds, limit, job_types
         return self.leases
 
     def complete(self, lease: JobLease, *, completed_at: datetime) -> None:

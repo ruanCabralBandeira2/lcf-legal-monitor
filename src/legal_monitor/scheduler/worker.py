@@ -32,6 +32,7 @@ class SchedulerRepository(Protocol):
         now: datetime,
         lease_seconds: int,
         limit: int,
+        job_types: tuple[str, ...],
     ) -> tuple[JobLease, ...]: ...
 
     def complete(self, lease: JobLease, *, completed_at: datetime) -> None: ...
@@ -87,6 +88,7 @@ class SchedulerWorker:
             now=started_at,
             lease_seconds=self._lease_seconds,
             limit=self._batch_size,
+            job_types=tuple(self._handlers),
         )
         succeeded = retried = blocked = failed = 0
         for lease in leases:

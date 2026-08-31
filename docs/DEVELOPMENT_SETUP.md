@@ -5,7 +5,7 @@
 - Command Line Tools do Xcode 16.4 e Git 2.39.5 disponíveis.
 - Docker Desktop 4.88.1, Engine 29.7.2 e Compose 5.4.0 funcionando em Apple Silicon.
 - PostgreSQL 17.11 saudável no Docker, exposto somente em `127.0.0.1:5432`.
-- Migrações `001_foundation.sql` e `002_scheduler_health.sql` aplicadas; o esquema contém 17 tabelas.
+- Migrações `001_foundation.sql`, `002_scheduler_health.sql` e `003_admin_registration.sql` aplicadas; o esquema contém 17 tabelas.
 - Python 3.12.13 e `uv` 0.12.7 instalados somente dentro do projeto.
 - Ambiente `.venv` recriado com esse Python e todas as versões de `requirements.lock`.
 - GitHub CLI 2.98.0 instalado somente no projeto e autenticado via chaveiro do macOS.

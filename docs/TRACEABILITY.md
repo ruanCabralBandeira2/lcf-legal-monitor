@@ -15,8 +15,8 @@
 | Prova de notificação | `legal_monitor.notifications`, `docs/runbooks/DEMO_NOTIFICATION.md` | entrega externa Discord validada em 31/08/2026 com segredo no Keychain e PDF fictício; uso jurídico continua bloqueado |
 | Discord/outbox operacional | `docs/backlog/DISCORD_OPERACIONAL.md` | desenho registrado; bloqueado por M0/M8 |
 | Push/WhatsApp/IA operacionais | bloqueados por M0 e marcos M6-M8 | não iniciado |
-| Resumo factual da peça | `SUMMARY_ENABLED=false`, M7 | objetivo confirmado; modelo, sigilo, proveniência, qualidade e revisão humana pendentes |
-| Campo "o que foi decidido" | M7 | não iniciado; deverá citar peça/páginas, separar extração de inferência e falhar para revisão humana |
+| Resumo factual da peça | `legal_monitor.summaries`, `SUMMARY_ENABLED=false`, ADR-006 | contrato, validação de evidência, fallback e fixture implementados; extração/modelo real bloqueados pelo M0/M7 |
+| Campo "o que foi decidido" | `FactualSummaryDraft.decision_result`, `summary-demo` | schema e demonstração fictícia implementados; revisão humana obrigatória |
 | M2 - scheduler/leases/backoff | `legal_monitor.scheduler`, `migrations/002_scheduler_health.sql` | implementado; testes unitários e PostgreSQL |
 | M2 - launchd/heartbeat interno | `ops/launchd`, `docs/runbooks/SCHEDULER.md`, comandos CLI | implementado; instalação automática ainda não ativada |
 | M2 - heartbeat externo | provedor ainda não escolhido no M0 | bloqueado sem esconder a ausência |

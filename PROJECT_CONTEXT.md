@@ -27,7 +27,8 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 - M3: núcleo administrativo local concluído; API/painel em rede adiado até definir autenticação.
 - Prova de notificação: entrega externa validada no Discord em 31/08/2026 com mensagem fixa e PDF vazio; o webhook novo permaneceu somente no Keychain e o Discord operacional continua bloqueado pelo M0/M8.
 - DataJud: estudo oficial concluído; a API fornece metadados/movimentações, não arquivos de peças. Nenhuma chamada foi realizada.
-- M4-M9: ainda não iniciados; qualquer fonte real e qualquer mensagem jurídica real permanecem bloqueados pelo M0.
+- M4-M6 e M8-M9: ainda não iniciados; qualquer fonte real e qualquer mensagem jurídica real permanecem bloqueados pelo M0.
+- M7 adiantado somente no núcleo seguro: schema factual, evidências de página/trecho, fallback explícito e fixture determinística implementados; nenhuma extração ou IA real foi integrada.
 
 ## Objetivo funcional confirmado para o piloto
 
@@ -66,6 +67,7 @@ DataJud poderá servir como sinal auxiliar de capa e movimentação após aprova
 - Pesquisa DataJud registrada em `docs/research/DATAJUD_API.md` e ADR-005: futuro uso apenas como gatilho/metadata; peça virá do conector autorizado.
 - Backlog do Discord operacional registrado em `docs/backlog/DISCORD_OPERACIONAL.md`; intenção do usuário anotada sem liberar dados reais.
 - Mensagem não técnica para obter autorização e dados mínimos do piloto registrada em `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md`, sem solicitar credenciais no grupo.
+- Contrato `legal_monitor.summaries` recusa fatos sem evidência verificável, mantém `REVIEW_REQUIRED`, nunca calcula prazo e possui somente provedor fake restrito à fixture.
 
 ## Travas vigentes
 
@@ -131,6 +133,14 @@ Prova de notificação já executada em 31/08/2026:
 
 Instruções e limites: `docs/runbooks/DEMO_NOTIFICATION.md`.
 
+Demonstração local do resumo factual, sem PDF real, IA ou rede:
+
+```bash
+PYTHONPATH=src .venv/bin/python -m legal_monitor.cli summary-demo
+```
+
+Instruções e limites: `docs/runbooks/SUMMARY_DEMO.md`.
+
 ## Próxima sequência segura
 
 1. Confirmar a revogação de todo webhook que apareceu em conversa e revisar participantes/retenção do canal de demonstração.
@@ -147,7 +157,8 @@ A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/M
 ## Última validação conhecida
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
-- Versão 0.5.0: 56 testes e 3 subtestes aprovados com PostgreSQL real; Ruff, formatação e migrações aprovados.
+- Versão 0.6.0: contrato de resumo factual e comando `summary-demo` adicionados sem liberar o M0.
+- Validação da versão 0.6.0: 60 testes e 5 subtestes aprovados; 5 testes dependentes de ambiente ignorados; Ruff, formatação, migrações e saída segura do `summary-demo` aprovados.
 - Testes cobrem Keychain sanitizado, URL oficial, menções desativadas, PDF válido, limite e multipart Discord sem rede externa.
 - Em 31/08/2026, a prova externa Discord retornou sucesso e um `provider_id`, usando somente a fixture fixa e `prova_ficticia.pdf`; `real_process_data_used=false`.
 - O webhook novo foi localizado somente pelo serviço/conta do Keychain e seu valor não foi impresso, salvo no repositório ou incluído em `.env`.

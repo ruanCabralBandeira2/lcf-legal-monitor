@@ -197,6 +197,8 @@ class Settings:
             raise ConfigError("Conectores reais exigem M0_APPROVED=true")
         if self.whatsapp_enabled and not self.m0_approved:
             raise ConfigError("WhatsApp exige M0_APPROVED=true")
+        if self.summary_enabled and not self.m0_approved:
+            raise ConfigError("Resumo operacional exige M0_APPROVED=true")
         if self.discord_demo_enabled and self.app_env is AppEnvironment.PRODUCTION:
             raise ConfigError("Discord de demonstração não pode ser ativado em produção")
         for label, value in (

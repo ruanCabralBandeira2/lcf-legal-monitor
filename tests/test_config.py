@@ -26,6 +26,7 @@ class SettingsTests(unittest.TestCase):
         self.assertFalse(settings.real_connectors_enabled)
         self.assertFalse(settings.whatsapp_enabled)
         self.assertFalse(settings.discord_demo_enabled)
+        self.assertFalse(settings.summary_enabled)
         self.assertEqual(settings.discord_webhook_keychain_service, DISCORD_KEYCHAIN_SERVICE)
         self.assertEqual(settings.discord_webhook_keychain_account, DISCORD_KEYCHAIN_ACCOUNT)
         self.assertFalse(settings.m0_approved)
@@ -96,6 +97,14 @@ class SettingsTests(unittest.TestCase):
                     "M0_APPROVED": "true",
                     "DISCORD_DEMO_ENABLED": "true",
                 },
+                root_dir=self.root,
+                load_dotenv=False,
+            )
+
+    def test_rejects_operational_summary_without_m0_approval(self) -> None:
+        with self.assertRaisesRegex(ConfigError, "Resumo operacional exige M0_APPROVED"):
+            Settings.from_env(
+                {"SUMMARY_ENABLED": "true"},
                 root_dir=self.root,
                 load_dotenv=False,
             )

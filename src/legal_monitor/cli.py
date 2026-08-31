@@ -30,6 +30,8 @@ from legal_monitor.notifications.keychain import KeychainSecretError, MacOSKeych
 from legal_monitor.scheduler.policy import RetryPolicy
 from legal_monitor.scheduler.repository import PostgresSchedulerRepository
 from legal_monitor.scheduler.worker import SchedulerWorker
+from legal_monitor.summaries.fake import FAKE_EXTRACTED_DOCUMENT, FakeSummaryProvider
+from legal_monitor.summaries.service import SummaryService
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -60,6 +62,7 @@ def doctor() -> int:
                 "discord_demo_enabled": settings.discord_demo_enabled,
                 "discord_secret_store": "macos-keychain",
                 "m0_approved": settings.m0_approved,
+                "summary_enabled": settings.summary_enabled,
             }
         )
     except (ConfigError, OSError) as exc:
@@ -207,6 +210,19 @@ def notification_demo_discord() -> int:
             "channel": receipt.channel,
             "provider_id": receipt.provider_id,
             "attachment": "prova_ficticia.pdf",
+        }
+    )
+    return 0
+
+
+def summary_demo() -> int:
+    result = SummaryService(FakeSummaryProvider(), enabled=True).summarize(FAKE_EXTRACTED_DOCUMENT)
+    _emit(
+        {
+            "safe_demo": True,
+            "network_used": False,
+            "real_process_data_used": False,
+            "summary": result.as_output_json(),
         }
     )
     return 0
@@ -363,6 +379,10 @@ def build_parser() -> argparse.ArgumentParser:
         "notification-demo-discord",
         help="envia uma fixture fixa, sem dado processual, a um webhook Discord privado",
     )
+    subcommands.add_parser(
+        "summary-demo",
+        help="gera resumo factual rastreável de uma fixture fixa, sem rede ou dado real",
+    )
     heartbeat_parser = subcommands.add_parser(
         "scheduler-heartbeat", help="registra o sinal interno do worker no PostgreSQL"
     )
@@ -419,6 +439,8 @@ def main(argv: list[str] | None = None) -> int:
             return demo()
         if args.command == "notification-demo-discord":
             return notification_demo_discord()
+        if args.command == "summary-demo":
+            return summary_demo()
         if args.command == "scheduler-heartbeat":
             return scheduler_heartbeat(args.worker_id)
         if args.command == "scheduler-health":

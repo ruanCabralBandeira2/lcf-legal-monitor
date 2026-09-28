@@ -141,3 +141,13 @@ class AuthAlertServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoginRefusalTests(unittest.TestCase):
+    def test_recognizes_sso_refusal_messages(self) -> None:
+        from legal_monitor.browser.session import LOGIN_REFUSED
+
+        self.assertTrue(LOGIN_REFUSED.search("X509 certificate authentication's failed."))
+        self.assertTrue(LOGIN_REFUSED.search("Invalid user"))
+        self.assertTrue(LOGIN_REFUSED.search("Usuário não cadastrado no sistema"))
+        self.assertFalse(LOGIN_REFUSED.search("Painel do Advogado"))

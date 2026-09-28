@@ -51,6 +51,51 @@ class PostgresMonitorRepository:
             for row in rows
         )
 
+    def process_id_for(self, cnj_digits: str) -> uuid.UUID | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id FROM legal_process WHERE numero_cnj = %s AND deleted_at IS NULL",
+                (cnj_digits,),
+            ).fetchone()
+        return row["id"] if row else None
+
+    def reset_history(self, process_id: uuid.UUID, *, actor_id: str, at: datetime) -> dict:
+        """Apaga só o que o robô gravou (movimentos, documentos registrados, procuras) para a
+        próxima rodada refazer a linha de base. Arquivos em storage/documents são mantidos."""
+        with self._connect() as connection:
+            documents = connection.execute(
+                "DELETE FROM document WHERE movement_id IN "
+                "(SELECT id FROM movement WHERE process_id = %s)",
+                (process_id,),
+            ).rowcount
+            movements = connection.execute(
+                "DELETE FROM movement WHERE process_id = %s", (process_id,)
+            ).rowcount
+            lookups = connection.execute(
+                "DELETE FROM source_lookup WHERE process_id = %s", (process_id,)
+            ).rowcount
+            connection.execute(
+                """
+                INSERT INTO audit_event
+                    (id, actor_type, actor_id, action, entity_type, entity_id, at,
+                     correlation_id, metadata_json)
+                VALUES (%s, 'ADMIN', %s, 'MONITOR_HISTORY_RESET', 'legal_process', %s, %s, %s,
+                        jsonb_build_object('movements', %s::int, 'documents', %s::int,
+                                           'lookups', %s::int))
+                """,
+                (
+                    uuid.uuid4(),
+                    actor_id,
+                    process_id,
+                    at,
+                    uuid.uuid4(),
+                    movements,
+                    documents,
+                    lookups,
+                ),
+            )
+        return {"movements": movements, "documents": documents, "lookups": lookups}
+
     def lookups(self) -> dict[tuple[uuid.UUID, str], tuple[str, datetime]]:
         with self._connect() as connection:
             rows = connection.execute(

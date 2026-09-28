@@ -123,6 +123,9 @@ class TimelineDocument:
     tag: str
     label: str
     document_id: str | None
+    # Endereço do documento lido na página (eproc). Permite baixar sem depender da posição
+    # na tela, que muda quando a lista de eventos tem várias páginas.
+    href: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,7 +184,7 @@ def items_from_payload(payload: dict[str, Any]) -> tuple[TimelineItem, ...]:
         for doc in raw.get("docs", []):
             found = DOCUMENT_ID.search(doc.get("hint", ""))
             doc_id = next((group for group in found.groups() if group), None) if found else None
-            docs.append(TimelineDocument(doc["tag"], doc.get("label", ""), doc_id))
+            docs.append(TimelineDocument(doc["tag"], doc.get("label", ""), doc_id, doc.get("href")))
         items.append(
             TimelineItem(raw.get("date"), raw.get("text", ""), tuple(docs), raw.get("event"))
         )

@@ -40,6 +40,9 @@ DOCUMENT_ACTIONS = frozenset(
     {"acessar_documento", "acessar_documento_implementacao", "acessar_documento_publico"}
 )
 PROCESS_ACTIONS = frozenset({"processo_selecionar"})
+# Paginação padrão das tabelas do eproc (framework "infra" do TRF4).
+NEXT_PAGE_SELECTOR = "a[id^='lnkInfraProximaPagina']"
+MAX_EVENT_PAGES = 60
 # Mensagem do eproc para busca sem resultado (texto já sem acentos).
 NOT_FOUND_TEXT = re.compile(r"nao encontrad|nenhum (?:processo|registro)", re.IGNORECASE)
 _EMBEDDED_DOCUMENT = re.compile(
@@ -50,7 +53,7 @@ _EMBEDDED_DOCUMENT = re.compile(
 # Tabela de eventos: localiza pela id conhecida (#tblEventos) ou pelo cabeçalho.
 # Cada linha com data vira um item; links de documento recebem data-lcf-doc.
 _EVENTS_JS = r"""
-(forbiddenSource) => {
+([forbiddenSource, pageIndex]) => {
   const forbidden = new RegExp(forbiddenSource, 'i');
   let table = document.querySelector('#tblEventos');
   if (!table) {
@@ -74,9 +77,9 @@ _EVENTS_JS = r"""
       if (!/acao=acessar_documento/i.test(href)) return;
       const label = (a.innerText || a.title || '').replace(/\s+/g, ' ').trim();
       if (forbidden.test(label) || forbidden.test(a.title || '')) return;
-      const tag = `${items.length}-${docs.length}`;
+      const tag = `${pageIndex}-${items.length}-${docs.length}`;
       a.setAttribute('data-lcf-doc', tag);
-      docs.push({tag, label, hint: href});
+      docs.push({tag, label, hint: href, href});
     });
     items.push({
       date: texts[dateIdx],
@@ -142,13 +145,33 @@ class EprocConnector:
         raise ConnectorError(ErrorCode.PARSE_ERROR, "Resultado da busca do eproc não reconhecido")
 
     def read_timeline(self, autos: Page) -> tuple[TimelineItem, ...]:
-        payload = autos.evaluate(_EVENTS_JS, FORBIDDEN_PATTERN)
-        items = items_from_payload(payload)
-        if not payload.get("found") or not items:
+        """Lê TODAS as páginas da tabela de eventos (1º uso real, 28/09/2026: o eproc do TRF2
+        mostrou só os eventos 1-50 na primeira página)."""
+        collected: dict[str, TimelineItem] = {}
+        table_found = False
+        for page_index in range(MAX_EVENT_PAGES):
+            payload = autos.evaluate(_EVENTS_JS, [FORBIDDEN_PATTERN, page_index])
+            table_found = table_found or bool(payload.get("found"))
+            for item in items_from_payload(payload):
+                key = item.event_id or f"{page_index}|{item.date_text}|{item.text}"
+                collected.setdefault(key, item)
+            next_link = autos.locator(NEXT_PAGE_SELECTOR).first
+            if next_link.count() == 0 or not next_link.is_visible():
+                break
+            # Paginação da tabela (infraAcaoPaginar): somente leitura.
+            next_link.click()
+            with contextlib.suppress(Exception):
+                autos.wait_for_load_state("networkidle", timeout=30_000)
+        else:
+            raise ConnectorError(
+                ErrorCode.PARSE_ERROR, f"Mais de {MAX_EVENT_PAGES} páginas de eventos"
+            )
+        items = tuple(collected.values())
+        if not table_found or not items:
             raise ConnectorError(
                 ErrorCode.PARSE_ERROR, "Tabela de eventos do eproc não reconhecida"
             )
-        # O eproc lista do evento mais recente para o mais antigo; garante essa ordem.
+        # Do evento mais recente para o mais antigo, independentemente da ordem da tela.
         if all(item.event_id and item.event_id.isdigit() for item in items):
             items = tuple(sorted(items, key=lambda item: int(item.event_id or 0), reverse=True))
         return items
@@ -156,7 +179,10 @@ class EprocConnector:
     def download_document(
         self, context: BrowserContext, autos: Page, document: TimelineDocument, target: Path
     ) -> Path:
-        href = autos.locator(f"[data-lcf-doc='{document.tag}']").first.get_attribute("href")
+        # Usa o endereço lido na tabela: com várias páginas, a posição na tela não serve.
+        href = document.href or autos.locator(
+            f"[data-lcf-doc='{document.tag}']"
+        ).first.get_attribute("href")
         url = self._allowed_document_url(urljoin(autos.url, href or ""))
         target.parent.mkdir(parents=True, exist_ok=True)
         body = context.request.get(url, timeout=90_000).body()

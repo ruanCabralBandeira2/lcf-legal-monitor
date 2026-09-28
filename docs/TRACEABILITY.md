@@ -37,3 +37,6 @@
 | Processos restritos e eventos de intimação | `MonitoredProcess.sensitivity`, `TimelineItem.documents_allowed` | e-mail só aviso para RESTRICTED; documentos de intimação/citação nunca abertos |
 | Resultado de procura por site e registro da rodada | migração 006 `source_lookup`, `logs/monitor-<site>-<data>.json`, `sites-report` (procura) | implementado após a 1ª tentativa real sem sucesso (28/09/2026) |
 | Prova positiva de login no eproc | `SourceEndpoint.logged_in_selector`, `classify_session` | corrige falso positivo da tela externa da JFRJ |
+| Paginação de eventos do eproc e download por endereço | `EprocConnector.read_timeline` (todas as páginas), `TimelineDocument.href`, `tests/test_eproc.py` (duas páginas simuladas no Edge) | corrigido após 1º ciclo real no TRF2 (28/09/2026) |
+| Trava contra enxurrada de novidades | `MAX_INDIVIDUAL_ALERTS`, `_send_burst_summary` | implementado |
+| Recusa de login explicada | `LOGIN_REFUSED`, `SessionCheck.detail` | implementado (caso TRF4 "Invalid user") |

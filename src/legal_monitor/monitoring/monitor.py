@@ -53,6 +53,9 @@ def movement_from_item(
 
 LOOKUP_RETRY = timedelta(hours=24)
 MAX_DISCOVERY_SHORT_SESSION = 8
+MAX_INDIVIDUAL_ALERTS = 10
+BURST_DOCUMENT_MOVEMENTS = 3
+MAX_BURST_LINES = 60
 _CNJ_IN_TEXT = re.compile(r"\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}|\d{20}")
 
 
@@ -379,6 +382,11 @@ class MonitorService:
             to_notify = {id(pairs[0][0])}
         else:
             to_notify = {id(item) for item, _ in new}
+        # Trava contra enxurrada: muitas "novidades" de uma vez indicam mudança no site ou na
+        # leitura. Um único e-mail consolidado; documentos só das mais recentes.
+        burst = not outcome.first_run and len(new) > MAX_INDIVIDUAL_ALERTS
+        if burst:
+            to_notify = {id(item) for item, _ in new[:BURST_DOCUMENT_MOVEMENTS]}
         for item, movement in reversed(new):  # do mais antigo para o mais recente
             movement_id = self._repo.insert_movement(process.id, movement, uuid.uuid4())
             if movement_id is None:
@@ -390,7 +398,7 @@ class MonitorService:
             for source_ref, record in records:
                 self._repo.insert_document(movement_id, source_ref, record)
             outcome.documents += len(records)
-            if self._notifier is not None:
+            if self._notifier is not None and not burst:
                 first = records[0][1] if records else None
                 restricted = process.sensitivity == "RESTRICTED"
                 message = build_movement_message(
@@ -407,8 +415,41 @@ class MonitorService:
                 )
                 self._notifier.send(message)
                 outcome.emails += 1
+        if burst and self._notifier is not None:
+            self._send_burst_summary(process, endpoint, [item for item, _ in new])
+            outcome.emails += 1
+            outcome.detail = f"{len(new)} movimentações novas de uma vez: e-mail consolidado"
         self._repo.mark_checked(process.id, status="ACTIVE_HEALTHY", at=now, success=True)
         outcome.status = "OK"
+
+    def _send_burst_summary(
+        self, process: MonitoredProcess, endpoint: SourceEndpoint, items: list[TimelineItem]
+    ) -> None:
+        restricted = process.sensitivity == "RESTRICTED"
+        lines = [
+            f"- {item.date_text or 's/ data'} | {'(restrito)' if restricted else item.text[:110]}"
+            for item in items[:MAX_BURST_LINES]
+        ]
+        if len(items) > MAX_BURST_LINES:
+            lines.append(f"- ... e mais {len(items) - MAX_BURST_LINES}")
+        assert self._notifier is not None
+        self._notifier.send(
+            NotificationMessage(
+                title=f"[LCF Monitor] {len(items)} movimentações novas: {process.cnj}",
+                body=(
+                    f"Processo: {process.cnj}\nFonte: {endpoint.notes.split(';')[0]}\n\n"
+                    "O robô encontrou várias movimentações novas de uma vez (pode ser uma "
+                    "mudança no site ou na leitura). Confira no sistema do tribunal.\n"
+                    f"Documentos das {BURST_DOCUMENT_MOVEMENTS} mais recentes foram guardados "
+                    "no computador do escritório.\n\n"
+                    + "\n".join(lines)
+                    + "\n\nPrazo não calculado."
+                ),
+                correlation_id=f"burst-{process.id}-{datetime.now(UTC):%Y%m%dT%H%M%S}",
+                demo_only=False,
+                max_length=20_000,
+            )
+        )
 
     def _download_all(
         self,

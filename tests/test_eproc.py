@@ -48,7 +48,7 @@ def _payload_from_edge() -> dict | None:
             browser = playwright.chromium.launch(channel="msedge", headless=True)
             page = browser.new_page()
             page.set_content(EPROC_FIXTURE)
-            payload = page.evaluate(_EVENTS_JS, FORBIDDEN_PATTERN)
+            payload = page.evaluate(_EVENTS_JS, [FORBIDDEN_PATTERN, 0])
             browser.close()
             return payload
     except Exception:
@@ -95,3 +95,57 @@ class EprocConnectorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+_HEADER = (
+    "<tr><th>Evento</th><th>Data/Hora</th><th>Descrição</th><th>Usuário</th>"
+    "<th>Documentos</th></tr>"
+)
+# eproc com eventos em duas páginas, em ordem crescente (como no TRF2 real): a página 1 tem
+# os mais antigos; a mais recente está na página 2. Dados fictícios.
+PAGINATED = {
+    "https://eproc.teste.jus.br/eventos?pagina=1": (
+        f'<html><body><table id="tblEventos">{_HEADER}'
+        "<tr><td>1</td><td>01/09/2026 10:00:00</td><td>Distribuição</td><td>A</td><td></td></tr>"
+        "<tr><td>2</td><td>02/09/2026 10:00:00</td><td>Conclusos</td><td>B</td><td></td></tr>"
+        '</table><a id="lnkInfraProximaPaginaSuperior" '
+        'href="https://eproc.teste.jus.br/eventos?pagina=2">Próxima</a></body></html>'
+    ),
+    "https://eproc.teste.jus.br/eventos?pagina=2": (
+        f'<html><body><table id="tblEventos">{_HEADER}'
+        "<tr><td>3</td><td>03/09/2026 10:00:00</td><td>Despacho</td><td>C</td>"
+        '<td><a href="controlador.php?acao=acessar_documento&doc=333&evento=3">DESP1</a></td></tr>'
+        '</table><a id="lnkInfraProximaPaginaSuperior" style="display:none" href="#">x</a>'
+        "</body></html>"
+    ),
+}
+
+
+class EprocPaginationTests(unittest.TestCase):
+    def test_reads_every_page_and_keeps_document_address(self) -> None:
+        try:
+            from playwright.sync_api import sync_playwright
+
+            playwright = sync_playwright().start()
+            browser = playwright.chromium.launch(channel="msedge", headless=True)
+        except Exception:
+            self.skipTest("Edge/Playwright indisponível (ex.: CI Linux)")
+        try:
+            context = browser.new_context()
+            context.route(
+                "https://eproc.teste.jus.br/**",
+                lambda route: route.fulfill(
+                    status=200,
+                    content_type="text/html; charset=utf-8",
+                    body=PAGINATED[route.request.url],
+                ),
+            )
+            page = context.new_page()
+            page.goto("https://eproc.teste.jus.br/eventos?pagina=1")
+            items = EprocConnector(CATALOG["eproc-trf2"]).read_timeline(page)
+        finally:
+            browser.close()
+            playwright.stop()
+        self.assertEqual([item.event_id for item in items], ["3", "2", "1"])
+        self.assertEqual(items[0].documents[0].document_id, "333")
+        self.assertIn("doc=333", items[0].documents[0].href or "")

@@ -251,6 +251,17 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual(group[1], new_pje)  # numeração PJe tem prioridade na descoberta
         self.assertEqual(len(group), 1 + MAX_DISCOVERY_SHORT_SESSION)
 
+    def test_burst_of_new_movements_sends_one_consolidated_email(self) -> None:
+        old = ("Decisão antiga", "Despacho antigo")
+        self._run(timeline(*old))
+        sent_before = len(self.notifier.sent)
+        burst = tuple(f"Movimentação nova {i}" for i in range(12))
+        outcome, connector = self._run(timeline(*burst, *old))
+        self.assertEqual(outcome.new_movements, 12)
+        self.assertEqual(len(self.notifier.sent) - sent_before, 1)
+        self.assertIn("12 movimentações novas", self.notifier.sent[-1].title)
+        self.assertEqual(len(connector.downloads), 3)  # só as 3 mais recentes
+
     def test_fingerprint_is_stable_across_runs(self) -> None:
         item = timeline("Decisão C")[0]
         first = movement_from_item(item, observed_at=datetime(2026, 9, 28, tzinfo=UTC))

@@ -36,7 +36,7 @@ from legal_monitor.domain.enums import Sensitivity, SessionState, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
 from legal_monitor.monitoring.auth_alert import AuthAlertService, build_approval_message
 from legal_monitor.monitoring.latest import LatestMovementService
-from legal_monitor.monitoring.monitor import MonitorService, next_candidate
+from legal_monitor.monitoring.monitor import MonitorService, connector_for, next_candidate
 from legal_monitor.monitoring.monitor_repository import PostgresMonitorRepository
 from legal_monitor.monitoring.repository import PostgresManualActionStore
 from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
@@ -385,6 +385,8 @@ def auth_open(source: str, click_certificate: bool) -> int:
         on_waiting_approval=on_waiting,
     )
     payload: dict[str, Any] = {"source": result.source, "session": result.state.value}
+    if result.detail:
+        payload["motivo"] = result.detail
     if manager.last_trace_path is not None:
         payload["login_trace"] = str(manager.last_trace_path)
     if result.state is SessionState.VALID:
@@ -548,6 +550,49 @@ def sites_report() -> int:
         if bucket["last_success"] is not None:
             bucket["last_success"] = bucket["last_success"].isoformat()
     _emit({"ok": True, "sites": dict(sorted(report.items(), key=lambda item: -item[1]["count"]))})
+    return 0
+
+
+def admin_reset_history(number: str, actor: str) -> int:
+    settings = Settings.from_env()
+    cnj = CnjNumber.parse(number)
+    repository = PostgresMonitorRepository(settings.database_url)
+    process_id = repository.process_id_for(cnj.digits)
+    if process_id is None:
+        _emit({"ok": False, "error": "Processo não cadastrado"})
+        return 1
+    removed = repository.reset_history(process_id, actor_id=actor, at=datetime.now(UTC))
+    _emit({"ok": True, "process": cnj.masked(), "removed": removed})
+    return 0
+
+
+def structure_diagnostic(number: str, site: str) -> int:
+    """Mapa da página do processo só com estrutura (ids/classes), para ajustar o leitor."""
+    settings = Settings.from_env()
+    cnj = CnjNumber.parse(number)
+    endpoint = get_endpoint(site)
+    connector = connector_for(endpoint)
+    if connector is None:
+        raise ConfigError(f"Site {site} ainda não tem robô")
+    manager = _session_manager(settings)
+    with manager.context(endpoint, headless=manager.headless_for(endpoint)) as context:
+        page = connector.open_autos(context, cnj)
+        stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
+        path = settings.temp_dir / "diagnostico" / f"estrutura-autos-{site}-{stamp}.json"
+        connector.dump_structure(page, path)
+        pagination_ids = page.evaluate(
+            '() => [...document.querySelectorAll(\'[id*="Pagin"], [id*="pagin"]\')]'
+            ".map((e) => e.id).slice(0, 40)"
+        )
+    _emit(
+        {
+            "ok": True,
+            "site": site,
+            "process": cnj.masked(),
+            "estrutura": str(path),
+            "ids_de_paginacao": pagination_ids,
+        }
+    )
     return 0
 
 
@@ -872,6 +917,18 @@ def build_parser() -> argparse.ArgumentParser:
     import_parser.add_argument("--actor", default="local-admin")
     import_parser.add_argument("--dry-run", action="store_true")
     subcommands.add_parser("sites-report", help="carteira cadastrada por site e estado")
+    reset_parser = subcommands.add_parser(
+        "admin-reset-history",
+        help="apaga o histórico gravado pelo robô para um processo (refaz a linha de base)",
+    )
+    reset_parser.add_argument("number")
+    reset_parser.add_argument("--actor", default="local-admin")
+    diagnostic_parser = subcommands.add_parser(
+        "diagnostico-estrutura",
+        help="gera o mapa da página do processo só com estrutura (sem conteúdo)",
+    )
+    diagnostic_parser.add_argument("number")
+    diagnostic_parser.add_argument("--site", required=True, choices=sorted(CATALOG))
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -929,6 +986,10 @@ def main(argv: list[str] | None = None) -> int:
             return import_processes(args.path, args.lawyer, args.actor, args.dry_run)
         if args.command == "sites-report":
             return sites_report()
+        if args.command == "admin-reset-history":
+            return admin_reset_history(args.number, args.actor)
+        if args.command == "diagnostico-estrutura":
+            return structure_diagnostic(args.number, args.site)
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

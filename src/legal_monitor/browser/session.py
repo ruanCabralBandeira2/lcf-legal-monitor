@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -39,6 +40,27 @@ PASSWORD_SELECTOR = "input[type='password']"  # noqa: S105 - seletor CSS, não �
 
 class BrowserUnavailableError(RuntimeError):
     """Playwright ou o navegador não estão instalados neste host."""
+
+
+LOGIN_REFUSED = re.compile(
+    r"invalid user|authentication.{0,3}s failed|usu[aá]rio inv[aá]lido|usu[aá]rio n[aã]o "
+    r"(?:cadastrado|encontrado)|certificado (?:inv[aá]lido|n[aã]o cadastrado|revogado)",
+    re.IGNORECASE,
+)
+
+
+def _login_refusal(page: Page) -> str:
+    """Mensagem de recusa do site de login (texto da tela de erro do SSO, não do processo)."""
+    try:
+        text = page.locator("body").inner_text(timeout=2_000)
+    except Exception:
+        return ""
+    if LOGIN_REFUSED.search(text):
+        return (
+            "O site recusou o login: o usuário do certificado não está cadastrado ou não é "
+            "aceito neste tribunal. É preciso fazer o cadastro/credenciamento no próprio site."
+        )
+    return ""
 
 
 def _host_path(url: str) -> str:
@@ -81,6 +103,8 @@ class SessionCheck:
     source: str
     state: SessionState
     final_host: str
+    # Motivo legível quando o site recusou o login (ex.: certificado sem cadastro).
+    detail: str = ""
 
 
 class BrowserSessionManager:
@@ -190,6 +214,7 @@ class BrowserSessionManager:
                     )
             started = time.monotonic()
             notified = False
+            reopened = False
             check = SessionCheck(endpoint.key, SessionState.AUTH_REQUIRED, "")
             while time.monotonic() - started < timeout_seconds:
                 # O login por certificado abre e fecha janelas auxiliares (permissão do
@@ -200,7 +225,11 @@ class BrowserSessionManager:
                 except PlaywrightError:
                     return check  # navegador inteiro fechado pela pessoa
                 if not pages:
-                    # A aba principal fechou; os cookies podem já estar gravados.
+                    # A aba principal fechou; os cookies podem já estar gravados. Reabre UMA
+                    # vez (fluxo do PJe); se fechar de novo, a pessoa desistiu.
+                    if reopened:
+                        return check
+                    reopened = True
                     try:
                         page = context.new_page()
                         page.goto(endpoint.base_url, wait_until="domcontentloaded")
@@ -215,6 +244,13 @@ class BrowserSessionManager:
                     if current.state is SessionState.VALID:
                         return current
                     check = current
+                    refusal = _login_refusal(active)
+                    if refusal:
+                        # O site recusou o login (ex.: certificado sem cadastro): esperar não
+                        # adianta; para e explica.
+                        return SessionCheck(
+                            endpoint.key, SessionState.AUTH_REQUIRED, current.final_host, refusal
+                        )
                 if not notified and time.monotonic() - started >= notify_after_seconds:
                     on_waiting_approval()
                     notified = True

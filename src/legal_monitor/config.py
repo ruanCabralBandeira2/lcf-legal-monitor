@@ -87,6 +87,7 @@ class Settings:
     browser_profile_dir: Path = Path("browser_profiles")
     browser_headless: bool = True
     browser_channel: str = "chrome"
+    browser_visible_for_blocked: bool = False
 
     @classmethod
     def from_env(
@@ -203,6 +204,7 @@ class Settings:
             browser_profile_dir=browser_profile_dir.resolve(),
             browser_headless=_parse_bool(merged.get("BROWSER_HEADLESS"), default=True),
             browser_channel=merged.get("BROWSER_CHANNEL", "chrome").strip(),
+            browser_visible_for_blocked=_parse_bool(merged.get("BROWSER_VISIBLE_FOR_BLOCKED")),
         )
         settings.validate()
         return settings

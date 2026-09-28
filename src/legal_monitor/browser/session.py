@@ -53,15 +53,30 @@ class BrowserSessionManager:
     O robô só reutiliza o estado salvo e nunca digita senha ou código.
     """
 
-    def __init__(self, profile_root: Path, *, headless: bool = True, channel: str = "") -> None:
+    def __init__(
+        self,
+        profile_root: Path,
+        *,
+        headless: bool = True,
+        channel: str = "",
+        visible_for_blocked: bool = False,
+    ) -> None:
         self._root = profile_root.resolve()
         self._headless = headless
+        # Autorizado pelo operador em 28/09/2026: fontes que recusam headless usam janela
+        # visível do navegador comum. Nunca técnicas antifingerprint ou de evasão.
+        self._visible_for_blocked = visible_for_blocked
         # "chrome" usa o Google Chrome instalado, que enxerga o certificado do token USB
         # pelo repositório do sistema. Vazio = Chromium do Playwright.
         self._channel = channel
 
     def state_path(self, endpoint: SourceEndpoint) -> Path:
         return self._root / endpoint.auth_realm / "storage_state.json"
+
+    def headless_for(self, endpoint: SourceEndpoint) -> bool:
+        if endpoint.headless_blocked and self._visible_for_blocked:
+            return False
+        return self._headless
 
     def has_saved_state(self, endpoint: SourceEndpoint) -> bool:
         return self.state_path(endpoint).is_file()
@@ -143,11 +158,12 @@ class BrowserSessionManager:
     def check(self, endpoint: SourceEndpoint) -> SessionCheck:
         if not self.has_saved_state(endpoint):
             return SessionCheck(endpoint.key, SessionState.AUTH_REQUIRED, "")
-        if endpoint.headless_blocked and self._headless:
-            # A fonte recusa navegador sem janela; não há contorno. Decisão registrada no ADR-007.
+        headless = self.headless_for(endpoint)
+        if headless and endpoint.headless_blocked:
+            # A fonte recusa navegador sem janela e o modo visível não foi autorizado.
             return SessionCheck(endpoint.key, SessionState.UNAVAILABLE, "headless-blocked")
         try:
-            with self.context(endpoint) as context:
+            with self.context(endpoint, headless=headless) as context:
                 page = context.new_page()
                 page.goto(endpoint.base_url, wait_until="domcontentloaded")
                 return self._inspect(page, endpoint)

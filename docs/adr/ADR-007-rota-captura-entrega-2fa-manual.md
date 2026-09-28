@@ -47,6 +47,10 @@ Endereços conferidos em 28/09/2026: `eproc1g.tjrj.jus.br` (login pelo SSO Jus.b
 - E-mail: `EmailNotifier` via SMTP SSL; senha de app no cofre do sistema (`keyring`: Keychain no macOS, Gerenciador de Credenciais no Windows); PDFs somente de raiz permitida e até `EMAIL_MAX_ATTACHMENT_BYTES` (20 MiB). Acima disso, o e-mail aponta a pasta no Mac mini.
 - Telefone (SMS/WhatsApp oficial) e Discord operacional: adiados. O bot Discord criado pelo usuário é candidato a receber somente avisos operacionais sem dado jurídico.
 
+### Fontes que recusam navegador sem janela (28/09/2026)
+
+O PJe TJRJ responde HTTP 403 ao navegador headless e abre normalmente no navegador comum. O operador autorizou que o robô use **janela visível** do navegador comum (Edge no Windows, Chrome no Mac) para essas fontes (`headless_blocked` no catálogo + `BROWSER_VISIBLE_FOR_BLOCKED=true`). Proibido: user-agent falso, plugins furtivos, técnicas antifingerprint ou qualquer evasão. Sem a flag, a fonte é reportada `UNAVAILABLE`.
+
 ## Consequências
 
 - Clicar no botão de login por certificado não automatiza o 2FA: a aprovação continua humana. A regra do `AGENTS.md` permanece válida.

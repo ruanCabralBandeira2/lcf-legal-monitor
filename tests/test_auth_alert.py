@@ -60,6 +60,21 @@ class ClassifySessionTests(unittest.TestCase):
         self.assertIs(state, SessionState.VALID)
 
 
+class VisibleWindowPolicyTests(unittest.TestCase):
+    def test_blocked_source_uses_visible_window_only_when_authorized(self) -> None:
+        from pathlib import Path
+
+        from legal_monitor.browser.session import BrowserSessionManager
+
+        pje = CATALOG["pje-tjrj-1g"]
+        eproc = CATALOG["eproc-tjrj-1g"]
+        default = BrowserSessionManager(Path("x"), headless=True)
+        allowed = BrowserSessionManager(Path("x"), headless=True, visible_for_blocked=True)
+        self.assertTrue(default.headless_for(pje))
+        self.assertFalse(allowed.headless_for(pje))
+        self.assertTrue(allowed.headless_for(eproc))
+
+
 class AuthAlertServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.store = MemoryManualActionStore()

@@ -333,6 +333,7 @@ def _session_manager(settings: Settings, *, headless: bool | None = None) -> Bro
         settings.browser_profile_dir,
         headless=settings.browser_headless if headless is None else headless,
         channel=settings.browser_channel,
+        visible_for_blocked=settings.browser_visible_for_blocked,
     )
 
 

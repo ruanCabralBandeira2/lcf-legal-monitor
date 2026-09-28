@@ -188,7 +188,8 @@ A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/M
 - E-mail de teste mantido em `ruan.foca@gmail.com` (somente no `.env` local); o SMTP do Gmail exige **senha de app** de 16 letras, não a senha normal da conta.
 - 28/09/2026: senha de app gravada no Gerenciador de Credenciais do Windows; login SMTP confirmado e `email-test` enviado com sucesso (fixture fictícia + PDF em branco).
 - 28/09/2026: processo-piloto (TJRJ, `8.19`, origem 0209, sequencial `08...`) **não existe no eproc TJRJ 1g** ("Processo não encontrado"); o prefixo `08` indica origem no **PJe TJRJ**. Catálogo passou a incluir `pje-tjrj-1g` e `pje-tjrj-2g` (SSO Jus.br, certificado).
-- PJe TJRJ responde **HTTP 403 a navegador headless**, mas abre normalmente em navegador comum. Marcado `headless_blocked`; `auth-check` retorna `UNAVAILABLE` sem contorno. **Decisão pendente do operador:** monitorar PJe com janela visível do navegador no host (sem técnicas antifingerprint), ou usar outra fonte.
+- PJe TJRJ responde **HTTP 403 a navegador headless**, mas abre normalmente em navegador comum. Marcado `headless_blocked`; `auth-check` retorna `UNAVAILABLE` sem contorno. **Decisão do operador (28/09/2026): o robô pode usar janela visível** do navegador comum para essas fontes (`BROWSER_VISIBLE_FOR_BLOCKED=true` no `.env` local; ADR-007). Sem técnicas antifingerprint. No Mac mini, a janela aparecerá na sessão do usuário do serviço.
+- eproc TJRJ não tem "código" próprio: usa o mesmo CNJ `8.19`; o sistema de tramitação só é conhecido consultando (eproc -> PJe -> 2º grau -> PDPJ).
 - Incidente 28/09/2026: o motor do Docker falhou ("socket forwarder") e foi encerrado pela janela de erro; reinício do Docker Desktop + `wsl --shutdown` resolveu; volume do PostgreSQL preservado.
 - Número do processo-piloto será obtido no Astrea (software de gestão do escritório) e informado pelo operador; nunca registrar no Git.
 

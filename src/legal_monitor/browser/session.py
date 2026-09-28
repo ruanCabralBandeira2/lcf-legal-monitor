@@ -28,11 +28,22 @@ CAPTCHA_SELECTOR = (
     "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], "
     ".g-recaptcha, .h-captcha"
 )
+STALE_LOGIN_COOKIES = (
+    "KC_RESTART",
+    "OAuth_Token_Request_State",
+    "AUTH_SESSION_ID",
+    "AUTH_SESSION_ID_LEGACY",
+)
 PASSWORD_SELECTOR = "input[type='password']"  # noqa: S105 - seletor CSS, não é senha.
 
 
 class BrowserUnavailableError(RuntimeError):
     """Playwright ou o navegador não estão instalados neste host."""
+
+
+def _host_path(url: str) -> str:
+    parsed = urlparse(url)
+    return f"{parsed.hostname or ''}{parsed.path}"
 
 
 def classify_session(
@@ -74,6 +85,7 @@ class BrowserSessionManager:
         # Autorizado pelo operador em 28/09/2026: fontes que recusam headless usam janela
         # visível do navegador comum. Nunca técnicas antifingerprint ou de evasão.
         self._visible_for_blocked = visible_for_blocked
+        self.last_trace_path: Path | None = None
         # "chrome" usa o Google Chrome instalado, que enxerga o certificado do token USB
         # pelo repositório do sistema. Vazio = Chromium do Playwright.
         self._channel = channel
@@ -144,6 +156,13 @@ class BrowserSessionManager:
         válida em `notify_after_seconds`, `on_waiting_approval` é chamado uma única vez.
         """
         with self.context(endpoint, headless=False) as context:
+            # Cookies de "login em andamento" de tentativas interrompidas fazem o SSO
+            # recusar a próxima tentativa. A sessão já estabelecida (KEYCLOAK_IDENTITY,
+            # cookies do eproc) é preservada.
+            for name in STALE_LOGIN_COOKIES:
+                with contextlib.suppress(PlaywrightError):
+                    context.clear_cookies(name=name)
+            self._trace(context, endpoint)
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(endpoint.base_url, wait_until="domcontentloaded")
             if click_certificate and endpoint.certificate_login_label:
@@ -186,6 +205,33 @@ class BrowserSessionManager:
                 except PlaywrightError:
                     time.sleep(poll_seconds)
             return check
+
+    def _trace(self, context: BrowserContext, endpoint: SourceEndpoint) -> None:
+        """Registro de diagnóstico do login: só host e caminho, nunca query, texto ou cookie."""
+        log_path = self._root / f"login-trace-{endpoint.key}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        stream = log_path.open("w", encoding="utf-8")
+        self.last_trace_path = log_path
+
+        def write(event: str, detail: str = "") -> None:
+            stamp = time.strftime("%H:%M:%S")
+            with contextlib.suppress(ValueError):
+                stream.write(f"{stamp} {event} {detail}\n")
+                stream.flush()
+
+        def attach(page: Page) -> None:
+            write("aba-aberta")
+            page.on(
+                "framenavigated",
+                lambda frame: frame == page.main_frame and write("navegou", _host_path(frame.url)),
+            )
+            page.on("close", lambda _page: write("aba-fechada"))
+            page.on("crash", lambda _page: write("aba-travou"))
+
+        context.on("page", attach)
+        context.on("close", lambda _context: (write("navegador-fechado"), stream.close()))
+        for existing in context.pages:
+            attach(existing)
 
     def check(self, endpoint: SourceEndpoint) -> SessionCheck:
         if not self.has_saved_state(endpoint):

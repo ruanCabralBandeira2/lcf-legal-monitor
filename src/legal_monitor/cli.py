@@ -371,12 +371,15 @@ def auth_open(source: str, click_certificate: bool) -> int:
         except EmailNotificationError as exc:
             print(f"Aviso por e-mail não enviado: {exc}", file=sys.stderr)
 
-    result = _session_manager(settings, headless=False).login(
+    manager = _session_manager(settings, headless=False)
+    result = manager.login(
         endpoint,
         click_certificate=click_certificate,
         on_waiting_approval=on_waiting,
     )
     payload: dict[str, Any] = {"source": result.source, "session": result.state.value}
+    if manager.last_trace_path is not None:
+        payload["login_trace"] = str(manager.last_trace_path)
     if result.state is SessionState.VALID:
         try:
             outcome = _auth_alert_service(settings).handle(

@@ -17,6 +17,7 @@ from legal_monitor.admin.repository import AdminRepositoryError, PostgresAdminRe
 from legal_monitor.admin.service import AdminService, AdminValidationError
 from legal_monitor.browser.session import BrowserSessionManager, BrowserUnavailableError
 from legal_monitor.config import ConfigError, Settings
+from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.fake import FakeConnector
 from legal_monitor.connectors.routing import (
     CATALOG,
@@ -24,11 +25,12 @@ from legal_monitor.connectors.routing import (
     candidate_sources,
     get_endpoint,
 )
-from legal_monitor.documents.service import DocumentService
+from legal_monitor.documents.service import DocumentService, DocumentValidationError
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
 from legal_monitor.domain.enums import Sensitivity, SessionState, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
 from legal_monitor.monitoring.auth_alert import AuthAlertService, build_approval_message
+from legal_monitor.monitoring.latest import LatestMovementService
 from legal_monitor.monitoring.repository import PostgresManualActionStore
 from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
 from legal_monitor.notifications.discord import (
@@ -408,6 +410,24 @@ def auth_check(source: str | None, notify: bool) -> int:
     return 0 if all_valid else 1
 
 
+def fetch_latest(number: str, send: bool, source: str | None) -> int:
+    settings = Settings.from_env()
+    cnj = CnjNumber.parse(number)
+    notifier = (
+        _email_notifier(settings, settings.email_lawyer_to, settings.storage_dir) if send else None
+    )
+    service = LatestMovementService(
+        sessions=_session_manager(settings),
+        documents=DocumentService(settings.storage_dir, max_bytes=settings.max_document_bytes),
+        diagnostics_dir=settings.temp_dir / "diagnostico",
+        notifier=notifier,
+        max_attachment_bytes=settings.email_max_attachment_bytes,
+    )
+    result = service.run(cnj, source_key=source)
+    _emit({"ok": result.found, **result.as_dict()})
+    return 0 if result.found else 1
+
+
 def _scheduler_components() -> tuple[Settings, PostgresSchedulerRepository, RetryPolicy]:
     settings = Settings.from_env()
     repository = PostgresSchedulerRepository(settings.database_url)
@@ -631,6 +651,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     auth_check_parser.add_argument("source", nargs="?", choices=sorted(CATALOG))
     auth_check_parser.add_argument("--notify", action="store_true")
+    latest_parser = subcommands.add_parser(
+        "fetch-latest",
+        help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
+    )
+    latest_parser.add_argument("number")
+    latest_parser.add_argument("--send", action="store_true")
+    latest_parser.add_argument("--source", choices=sorted(CATALOG))
     return parser
 
 
@@ -673,11 +700,15 @@ def main(argv: list[str] | None = None) -> int:
             return auth_open(args.source, not args.no_certificate)
         if args.command == "auth-check":
             return auth_check(args.source, args.notify)
+        if args.command == "fetch-latest":
+            return fetch_latest(args.number, args.send, args.source)
     except (
         AdminRepositoryError,
         AdminValidationError,
         BrowserUnavailableError,
         ConfigError,
+        ConnectorError,
+        DocumentValidationError,
         DiscordNotificationError,
         EmailNotificationError,
         InvalidCnjNumber,

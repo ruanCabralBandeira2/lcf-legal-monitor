@@ -30,4 +30,4 @@
 | M3 - auditoria e ciclo de vida | eventos de cadastro/desativação e exclusão lógica | implementado; histórico preservado |
 | M3 - API/painel em rede | CLI administrativa é a interface mínima atual | adiado até definir autenticação e exposição local |
 | API Pública DataJud | `docs/research/DATAJUD_API.md`, `ADR-005` | estudo concluído: metadados/movimentos, sem peças; não consumida e aguarda aceite expresso |
-| Medição de duração da sessão | `session-watch`, CSV em `storage/tmp` | implementado; medição PJe/eproc em andamento |
+| Medição de duração da sessão | `session-watch`, CSV em `storage/tmp` | eproc ~10 h; PJe ~11-16 min após login com certificado, atividade não renova (28/09/2026) |

@@ -181,6 +181,11 @@ A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/M
 
 ## Última validação conhecida
 
+- 28/09/2026, **primeiro login real** no eproc TJRJ 1º grau via `auth-open` (Edge + token USB + 2FA no celular): sessão `VALID`, salva em `browser_profiles/jusbr` (cookies do eproc TJRJ e do SSO Jus.br). `auth-check` em modo headless reutilizou a sessão com sucesso.
+- Estrutura observada no eproc logado: entrada em `controlador.php?acao=painel_adv_listar` (Painel do Advogado); busca rápida pelo campo `txtNumProcessoPesquisaRapida`; menu com ações de **escrita** (petição, movimentação, substabelecimento, `acao=sair`). Regra do conector: lista fechada de ações somente leitura; nunca seguir links de escrita nem de encerrar sessão.
+- Exploração da carteira completa de processos do advogado foi negada pela política do agente; o parser será construído a partir de **um** processo indicado pelo operador.
+- E-mail de teste trocado para `ruan.senac2022@gmail.com` (somente no `.env` local); o Gmail exige senha de app (conta com 2FA).
+
 - 28/09/2026, Windows, versão 0.7.0: migrações 001-004 aplicadas no PostgreSQL 17.11 (Docker/WSL2); 85 testes aprovados incluindo PostgreSQL, 1 ignorado (symlink no Windows); Ruff e formatação aprovados. Playwright + Edge 154 abriu o eproc TJRJ e `auth-check` retornou `AUTH_REQUIRED` corretamente (ainda sem login).
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.

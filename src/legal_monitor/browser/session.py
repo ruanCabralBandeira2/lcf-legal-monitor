@@ -12,6 +12,14 @@ from urllib.parse import urlparse
 from legal_monitor.connectors.routing import SourceEndpoint
 from legal_monitor.domain.enums import SessionState
 
+try:
+    from playwright.sync_api import Error as PlaywrightError
+except ImportError:  # Playwright é opcional (extra "browser").
+
+    class PlaywrightError(Exception):  # type: ignore[no-redef]
+        pass
+
+
 if TYPE_CHECKING:
     from playwright.sync_api import BrowserContext, Page
 
@@ -113,9 +121,11 @@ class BrowserSessionManager:
                     yield context
                 finally:
                     self._save_state(context, state_path)
-                    context.close()
+                    with contextlib.suppress(PlaywrightError):
+                        context.close()
             finally:
-                browser.close()
+                with contextlib.suppress(PlaywrightError):
+                    browser.close()
 
     def login(
         self,
@@ -145,14 +155,36 @@ class BrowserSessionManager:
             notified = False
             check = SessionCheck(endpoint.key, SessionState.AUTH_REQUIRED, "")
             while time.monotonic() - started < timeout_seconds:
-                active = context.pages[-1] if context.pages else page
-                check = self._inspect(active, endpoint, settle=False)
-                if check.state is SessionState.VALID:
-                    return check
+                # O login por certificado abre e fecha janelas auxiliares (permissão do
+                # navegador, PJeOffice, popups do SSO). Qualquer aba pode sumir a qualquer
+                # momento; olhamos todas as abertas e nunca dependemos de uma só.
+                try:
+                    pages = [item for item in context.pages if not item.is_closed()]
+                except PlaywrightError:
+                    return check  # navegador inteiro fechado pela pessoa
+                if not pages:
+                    # A aba principal fechou; os cookies podem já estar gravados.
+                    try:
+                        page = context.new_page()
+                        page.goto(endpoint.base_url, wait_until="domcontentloaded")
+                        pages = [page]
+                    except PlaywrightError:
+                        return check
+                for active in reversed(pages):
+                    try:
+                        current = self._inspect(active, endpoint, settle=False)
+                    except PlaywrightError:
+                        continue  # aba fechando ou no meio de uma navegação
+                    if current.state is SessionState.VALID:
+                        return current
+                    check = current
                 if not notified and time.monotonic() - started >= notify_after_seconds:
                     on_waiting_approval()
                     notified = True
-                active.wait_for_timeout(int(poll_seconds * 1000))
+                try:
+                    pages[0].wait_for_timeout(int(poll_seconds * 1000))
+                except PlaywrightError:
+                    time.sleep(poll_seconds)
             return check
 
     def check(self, endpoint: SourceEndpoint) -> SessionCheck:
@@ -189,6 +221,9 @@ class BrowserSessionManager:
     @staticmethod
     def _save_state(context: BrowserContext, state_path: Path) -> None:
         temporary = state_path.with_suffix(".tmp")
-        context.storage_state(path=str(temporary))
+        try:
+            context.storage_state(path=str(temporary))
+        except PlaywrightError:
+            return  # navegador já fechado: mantém o último estado salvo
         os.chmod(temporary, 0o600)
         os.replace(temporary, state_path)

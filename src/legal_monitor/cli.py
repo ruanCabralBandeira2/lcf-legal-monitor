@@ -633,7 +633,11 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
                 page.wait_for_load_state("networkidle", timeout=20_000)
             page.fill("#parte1ProcCNJ", formatted[:20])
             page.fill("#parte2ProcCNJ", formatted[21:])
-            page.locator("button:has-text('Pesquisar')").first.click()
+            # O botão visível é só um ícone (lupa); outro "Pesquisar" com texto fica oculto.
+            try:
+                page.locator("[id='form:commandButton3']").first.click(timeout=10_000)
+            except Exception:
+                page.press("#parte2ProcCNJ", "Enter")
             page.wait_for_timeout(8_000)
             result_page = context.pages[-1]
             with contextlib.suppress(Exception):

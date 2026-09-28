@@ -635,30 +635,47 @@ _UI_LABELS_JS = r"""
   ])
   .filter(([label]) => label)
 """
+# Itens do submenu recolhível #CONSULTAS do Portal (lidos mesmo recolhidos): rótulo, rota,
+# e se está visível agora.
+_CONSULTAS_ITEMS_JS = r"""
+() => [...document.querySelectorAll('#CONSULTAS li, #CONSULTAS a')]
+  .map((e) => [
+    (e.innerText || e.textContent || '').trim().split('\n')[0].slice(0, 60),
+    e.getAttribute('href') || e.getAttribute('routerlink') || '',
+    e.offsetParent !== null,
+  ])
+  .filter(([label]) => label)
+"""
 _AVOID_MENU = re.compile(r"peti|distribu|advogad|\boab\b|meus|minhas|push|painel", re.IGNORECASE)
 
 
 def _portal_explore(page: Any, formatted: str, out_dir: Path, stamp: str) -> dict[str, Any]:
     """Dentro do Portal logado: Consultas -> consulta por número -> resultado (só estrutura)."""
     found: dict[str, Any] = {}
-    before = {label for label, _ in page.evaluate(_UI_LABELS_JS)}
-    page.get_by_text("Consultas", exact=True).first.click(timeout=15_000)
-    page.wait_for_timeout(2_500)
-    submenu = [
-        [_masked(label, 60), _masked(route, 70)]
-        for label, route in page.evaluate(_UI_LABELS_JS)
-        if label not in before
-    ]
-    found["submenu_consultas"] = submenu[:30]
+    # Há dois menus (computador e celular, este oculto): só o cabeçalho VISÍVEL de Consultas.
+    only_consultas = re.compile(r"^\s*Consultas\s*$")
+    header = page.locator("#lista-menu div.menu-header:visible").filter(has_text=only_consultas)
+    if header.count() == 0:
+        header = page.locator("div.menu-header:visible, div.txt:visible").filter(
+            has_text=only_consultas
+        )
+    header.first.click(timeout=15_000)
+    page.wait_for_timeout(2_000)
+    submenu = page.evaluate(_CONSULTAS_ITEMS_JS)
+    found["submenu_consultas"] = [
+        [_masked(label, 60), _masked(route, 70), visible] for label, route, visible in submenu
+    ][:30]
     candidates = [
         label
-        for label, _ in submenu
+        for label, _, _ in submenu
         if re.search(r"process", label, re.IGNORECASE) and not _AVOID_MENU.search(label)
     ]
-    found["item_escolhido"] = candidates[0] if candidates else None
+    found["item_escolhido"] = _masked(candidates[0], 60) if candidates else None
     if not candidates:
         return found
-    page.get_by_text(candidates[0], exact=True).first.click(timeout=15_000)
+    page.locator("#CONSULTAS li:visible, #CONSULTAS a:visible").filter(
+        has_text=re.compile(rf"^\s*{re.escape(candidates[0])}\s*$")
+    ).first.click(timeout=15_000)
     with contextlib.suppress(Exception):
         page.wait_for_load_state("networkidle", timeout=20_000)
     page.wait_for_timeout(2_500)

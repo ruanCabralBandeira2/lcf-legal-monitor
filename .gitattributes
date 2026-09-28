@@ -1,0 +1,3 @@
+# LF sempre: o checksum das migrações (scripts/migrate.py) precisa ser igual no Windows e no Mac.
+* text=auto eol=lf
+*.pdf binary

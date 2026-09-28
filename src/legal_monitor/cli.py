@@ -626,7 +626,111 @@ def _page_text(page: Any) -> str:
         return ""
 
 
-def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
+_UI_LABELS_JS = r"""
+() => [...document.querySelectorAll('a, button, [role=menuitem], [role=tab], li, mat-list-item')]
+  .filter((e) => e.offsetParent !== null)
+  .map((e) => [
+    (e.innerText || e.getAttribute('aria-label') || '').trim().split('\n')[0].slice(0, 60),
+    e.getAttribute('href') || e.getAttribute('routerlink') || '',
+  ])
+  .filter(([label]) => label)
+"""
+_AVOID_MENU = re.compile(r"peti|distribu|advogad|\boab\b|meus|minhas|push|painel", re.IGNORECASE)
+
+
+def _portal_explore(page: Any, formatted: str, out_dir: Path, stamp: str) -> dict[str, Any]:
+    """Dentro do Portal logado: Consultas -> consulta por número -> resultado (só estrutura)."""
+    found: dict[str, Any] = {}
+    before = {label for label, _ in page.evaluate(_UI_LABELS_JS)}
+    page.get_by_text("Consultas", exact=True).first.click(timeout=15_000)
+    page.wait_for_timeout(2_500)
+    submenu = [
+        [_masked(label, 60), _masked(route, 70)]
+        for label, route in page.evaluate(_UI_LABELS_JS)
+        if label not in before
+    ]
+    found["submenu_consultas"] = submenu[:30]
+    candidates = [
+        label
+        for label, _ in submenu
+        if re.search(r"process", label, re.IGNORECASE) and not _AVOID_MENU.search(label)
+    ]
+    found["item_escolhido"] = candidates[0] if candidates else None
+    if not candidates:
+        return found
+    page.get_by_text(candidates[0], exact=True).first.click(timeout=15_000)
+    with contextlib.suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=20_000)
+    page.wait_for_timeout(2_500)
+    found["rota_consulta"] = _route(page.url)
+    inputs = page.locator("input:visible").all()[:15]
+    found["campos_consulta"] = [
+        [
+            element.get_attribute("type") or "",
+            element.get_attribute("id") or element.get_attribute("formcontrolname") or "",
+            _masked(
+                element.get_attribute("placeholder") or element.get_attribute("aria-label"), 50
+            ),
+        ]
+        for element in inputs
+    ]
+    target = next(
+        (
+            element
+            for element in inputs
+            if re.search(
+                r"process|n[uú]mero|cnj",
+                " ".join(
+                    element.get_attribute(k) or ""
+                    for k in ("placeholder", "aria-label", "formcontrolname", "id", "name")
+                ),
+                re.IGNORECASE,
+            )
+        ),
+        None,
+    )
+    found["campo_numero_achado"] = target is not None
+    if target is None:
+        return found
+    target.fill(formatted)
+    button = page.locator("button:visible").filter(
+        has_text=re.compile(r"pesquis|consult|buscar", re.IGNORECASE)
+    )
+    if button.count():
+        button.first.click(timeout=10_000)
+    else:
+        target.press("Enter")
+    for _ in range(30):
+        page.wait_for_timeout(1_000)
+        if page.locator("table tr, mat-row, mat-expansion-panel, mat-card").count():
+            break
+    with contextlib.suppress(Exception):
+        page.wait_for_load_state("networkidle", timeout=15_000)
+    result_tab = page.context.pages[-1]
+    path = out_dir / f"estrutura-tjrj-portal-resultado-{stamp}.json"
+    EprocConnector.dump_structure(result_tab, path)
+    found["resultado"] = {
+        "rota": _route(result_tab.url),
+        "abas": [_route(tab.url) for tab in page.context.pages],
+        "tabelas": result_tab.locator("table").count(),
+        "linhas": result_tab.locator("table tr, mat-row").count(),
+        "paineis": result_tab.locator("mat-expansion-panel, mat-card, .card").count(),
+        "links_documento": result_tab.locator(
+            "a[href*='document' i], a[href*='peca' i], a[href*='download' i], "
+            "a[href*='visualiz' i], [class*='document' i]"
+        ).count(),
+        "aviso_nao_encontrado": bool(
+            re.search(r"n[aã]o (?:foi )?encontrad", _page_text(result_tab), re.IGNORECASE)
+        ),
+        "botoes": [_masked(label, 40) for label, _ in result_tab.evaluate(_UI_LABELS_JS)[:60]][
+            -25:
+        ],
+        "estrutura": str(path),
+    }
+    return found
+
+
+def tjrj_diagnostic(number: str, skip_portal: bool, with_public: bool = False) -> int:
     """Testa as duas vias do TJRJ legado para UM processo e devolve só estrutura (ADR-008):
     A) consulta pública sem login; B) Portal de Serviços após login humano com certificado."""
     from playwright.sync_api import sync_playwright
@@ -640,48 +744,51 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
     report: dict[str, Any] = {"process": cnj.masked()}
     channel = {"channel": settings.browser_channel} if settings.browser_channel else {}
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=True, **channel)
-        try:
-            context = browser.new_context(locale="pt-BR")
-            page = context.new_page()
-            # Mesmo endereço que o formulário público gera (1º teste: o "8.19" já é fixo no
-            # formulário e foi duplicado). Número completo e correto direto na URL.
-            page.goto(
-                TJRJ_PUBLIC_RESULT_URL.format(number=formatted), wait_until="domcontentloaded"
-            )
-            result_page = context.pages[-1]
-            for _ in range(25):  # o aplicativo desenha o resultado depois de carregar
-                result_page.wait_for_timeout(1_000)
-                if result_page.locator(
-                    "table tr, mat-row, [class*='moviment' i], [id*='moviment' i]"
-                ).count():
-                    break
-            with contextlib.suppress(Exception):
-                result_page.wait_for_load_state("networkidle", timeout=15_000)
-            path = out_dir / f"estrutura-tjrj-publica-{stamp}.json"
-            EprocConnector.dump_structure(result_page, path)
-            final = urlparse(result_page.url)
-            report["consulta_publica"] = {
-                "abas_abertas": len(context.pages),
-                "destino": f"{final.hostname}{final.path}#{_masked(final.fragment, 60)}",
-                "titulo": _masked(result_page.title(), 60),
-                "captcha_na_tela": result_page.locator(_CAPTCHA_ANY).count(),
-                "tabelas": result_page.locator("table").count(),
-                "linhas_de_tabela": result_page.locator("table tr").count(),
-                "elementos_movimento": result_page.locator(
-                    "[class*='moviment' i], [id*='moviment' i]"
-                ).count(),
-                "linhas_de_lista": result_page.locator(
-                    "mat-row, .mat-row, .mat-mdc-row, li.list-group-item, .card"
-                ).count(),
-                # Só a presença da mensagem; o texto da página não sai do computador.
-                "aviso_nao_encontrado": bool(
-                    re.search(r"n[aã]o (?:foi )?encontrad", _page_text(result_page), re.IGNORECASE)
-                ),
-                "estrutura": str(path),
-            }
-        finally:
-            browser.close()
+        if with_public:
+            browser = playwright.chromium.launch(headless=True, **channel)
+            try:
+                context = browser.new_context(locale="pt-BR")
+                page = context.new_page()
+                # Mesmo endereço que o formulário público gera (1º teste: o "8.19" já é fixo no
+                # formulário e foi duplicado). Número completo e correto direto na URL.
+                page.goto(
+                    TJRJ_PUBLIC_RESULT_URL.format(number=formatted), wait_until="domcontentloaded"
+                )
+                result_page = context.pages[-1]
+                for _ in range(25):  # o aplicativo desenha o resultado depois de carregar
+                    result_page.wait_for_timeout(1_000)
+                    if result_page.locator(
+                        "table tr, mat-row, [class*='moviment' i], [id*='moviment' i]"
+                    ).count():
+                        break
+                with contextlib.suppress(Exception):
+                    result_page.wait_for_load_state("networkidle", timeout=15_000)
+                path = out_dir / f"estrutura-tjrj-publica-{stamp}.json"
+                EprocConnector.dump_structure(result_page, path)
+                final = urlparse(result_page.url)
+                report["consulta_publica"] = {
+                    "abas_abertas": len(context.pages),
+                    "destino": f"{final.hostname}{final.path}#{_masked(final.fragment, 60)}",
+                    "titulo": _masked(result_page.title(), 60),
+                    "captcha_na_tela": result_page.locator(_CAPTCHA_ANY).count(),
+                    "tabelas": result_page.locator("table").count(),
+                    "linhas_de_tabela": result_page.locator("table tr").count(),
+                    "elementos_movimento": result_page.locator(
+                        "[class*='moviment' i], [id*='moviment' i]"
+                    ).count(),
+                    "linhas_de_lista": result_page.locator(
+                        "mat-row, .mat-row, .mat-mdc-row, li.list-group-item, .card"
+                    ).count(),
+                    # Só a presença da mensagem; o texto da página não sai do computador.
+                    "aviso_nao_encontrado": bool(
+                        re.search(
+                            r"n[aã]o (?:foi )?encontrad", _page_text(result_page), re.IGNORECASE
+                        )
+                    ),
+                    "estrutura": str(path),
+                }
+            finally:
+                browser.close()
         if not skip_portal:
             endpoint = get_endpoint("tjrj-portal")
             browser = playwright.chromium.launch(headless=False, **channel)
@@ -751,6 +858,15 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
                     "campos": fields,
                     "estrutura": str(path),
                 }
+                if "portalservicos" in page.url:
+                    try:
+                        report["portal"]["consulta"] = _portal_explore(
+                            page, formatted, out_dir, stamp
+                        )
+                    except Exception as exc:
+                        report["portal"]["consulta_erro"] = _masked(
+                            f"{type(exc).__name__}: {exc}", 200
+                        )
             finally:
                 if browser.is_connected():
                     browser.close()
@@ -1099,6 +1215,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tjrj_parser.add_argument("number")
     tjrj_parser.add_argument("--sem-portal", action="store_true", help="só a consulta pública")
+    tjrj_parser.add_argument(
+        "--com-publica", action="store_true", help="inclui o teste da consulta pública"
+    )
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -1161,7 +1280,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diagnostico-estrutura":
             return structure_diagnostic(args.number, args.site)
         if args.command == "diagnostico-tjrj":
-            return tjrj_diagnostic(args.number, args.sem_portal)
+            return tjrj_diagnostic(args.number, args.sem_portal, args.com_publica)
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

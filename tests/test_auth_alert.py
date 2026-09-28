@@ -151,3 +151,14 @@ class LoginRefusalTests(unittest.TestCase):
         self.assertTrue(LOGIN_REFUSED.search("Invalid user"))
         self.assertTrue(LOGIN_REFUSED.search("Usuário não cadastrado no sistema"))
         self.assertFalse(LOGIN_REFUSED.search("Painel do Advogado"))
+
+
+class TjrjPortalLoginPageTests(unittest.TestCase):
+    def test_idserverjus_login_page_is_not_a_session(self) -> None:
+        state = classify_session(
+            final_url="https://www3.tjrj.jus.br/idserverjus-front/#/login?sgSist=PORTALSERVICOS",
+            expected_host="www3.tjrj.jus.br",
+            has_password_field=False,
+            has_captcha=False,
+        )
+        self.assertIs(state, SessionState.AUTH_REQUIRED)

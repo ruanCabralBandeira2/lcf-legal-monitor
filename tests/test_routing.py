@@ -22,11 +22,18 @@ def _cnj(justice: int, tribunal: int, *, origin: int = 1) -> CnjNumber:
 
 
 class RoutingTests(unittest.TestCase):
-    def test_tjrj_routes_to_eproc_then_pdpj(self) -> None:
+    def test_tjrj_legacy_numbering_routes_eproc_then_portal(self) -> None:
         keys = [item.key for item in candidate_sources(_cnj(8, 19))]
         self.assertEqual(
-            keys, ["eproc-tjrj-1g", "pje-tjrj-1g", "eproc-tjrj-2g", "pje-tjrj-2g", "pdpj"]
+            keys,
+            ["eproc-tjrj-1g", "tjrj-portal", "pje-tjrj-1g", "eproc-tjrj-2g", "pje-tjrj-2g", "pdpj"],
         )
+
+    def test_tjrj_portal_uses_certificate_image_and_official_host(self) -> None:
+        portal = CATALOG["tjrj-portal"]
+        self.assertIs(portal.system, SourceSystem.LEGACY_DCP)
+        self.assertEqual(portal.host, "www3.tjrj.jus.br")
+        self.assertIn("user-card", portal.certificate_login_selector or "")
 
     def test_pje_tjrj_shares_jusbr_login_and_is_marked_headless_blocked(self) -> None:
         pje = CATALOG["pje-tjrj-1g"]

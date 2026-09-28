@@ -234,7 +234,7 @@ class MonitorServiceTests(unittest.TestCase):
         legacy = MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None)
         self.assertEqual(next_candidate(legacy, {}, now), "eproc-tjrj-1g")
         lookups = {(legacy.id, "eproc-tjrj-1g"): ("NOT_FOUND", now - timedelta(hours=1))}
-        self.assertEqual(next_candidate(legacy, lookups, now), "pje-tjrj-1g")
+        self.assertEqual(next_candidate(legacy, lookups, now), "tjrj-portal")
         # Depois de 24 h volta a procurar no primeiro site (processos migram de sistema).
         stale = {(legacy.id, "eproc-tjrj-1g"): ("NOT_FOUND", now - timedelta(hours=25))}
         self.assertEqual(next_candidate(legacy, stale, now), "eproc-tjrj-1g")

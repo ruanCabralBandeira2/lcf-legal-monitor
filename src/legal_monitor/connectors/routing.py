@@ -31,6 +31,8 @@ class SourceEndpoint:
     headless_blocked: bool = False
     # Elemento que só existe com sessão ativa (prova positiva de login). None = não verificado.
     logged_in_selector: str | None = None
+    # Botão de login por certificado sem texto (ex.: imagem no IdServerJus do TJRJ).
+    certificate_login_selector: str | None = None
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
@@ -67,6 +69,21 @@ CATALOG: dict[str, SourceEndpoint] = {
             auth_realm="jusbr",
             notes="eproc TJRJ 2º grau; login via SSO Jus.br (endereço conferido em 28/09/2026)",
             certificate_login_label="Certificado Digital",
+        ),
+        SourceEndpoint(
+            key="tjrj-portal",
+            tribunal="TJRJ",
+            system=SourceSystem.LEGACY_DCP,
+            base_url=(
+                "https://www3.tjrj.jus.br/idserverjus-front/#/login"
+                "?indGet=true&sgSist=PORTALSERVICOS"
+            ),
+            auth_realm="tjrj-portal",
+            notes=(
+                "TJRJ Portal de Serviços (processo eletrônico legado); login IdServerJus por "
+                "certificado (imagem) ou usuário e senha"
+            ),
+            certificate_login_selector="img[src*='user-card']",
         ),
         SourceEndpoint(
             key="pje-tjrj-1g",
@@ -165,8 +182,15 @@ def candidate_keys(cnj: CnjNumber) -> tuple[str, ...]:
     second_instance = origin == "0000"
     if (justice, tribunal) == ("8", "19"):
         instances = ("2g", "1g") if second_instance else ("1g", "2g")
-        systems = ("pje", "eproc") if sequence >= PJE_TJRJ_SEQUENCE_START else ("eproc", "pje")
-        return (*(f"{system}-tjrj-{i}" for i in instances for system in systems), "pdpj")
+        if sequence >= PJE_TJRJ_SEQUENCE_START:
+            keys = [f"{system}-tjrj-{i}" for i in instances for system in ("pje", "eproc")]
+        else:
+            # Numeração antiga: eproc (migrados) e, se não estiver lá, o processo eletrônico
+            # do Portal de Serviços (informação do operador, 28/09/2026); PJe por último.
+            keys = [f"eproc-tjrj-{instances[0]}", "tjrj-portal"]
+            keys += [f"pje-tjrj-{instances[0]}"]
+            keys += [f"{system}-tjrj-{instances[1]}" for system in ("eproc", "pje")]
+        return (*keys, "pdpj")
     if (justice, tribunal) == ("4", "02"):
         pair = (
             ("eproc-trf2", "eproc-jfrj-1g") if second_instance else ("eproc-jfrj-1g", "eproc-trf2")

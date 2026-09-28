@@ -69,7 +69,7 @@ def _host_path(url: str) -> str:
 
 
 # Páginas que existem só para quem NÃO está logado (eproc: controlador externo; PJe: login).
-LOGGED_OUT_PATHS = ("externo_controlador", "login.seam")
+LOGGED_OUT_PATHS = ("externo_controlador", "login.seam", "idserverjus-front")
 
 
 def classify_session(
@@ -211,7 +211,11 @@ class BrowserSessionManager:
             self._trace(context, endpoint)
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(endpoint.base_url, wait_until="domcontentloaded")
-            if click_certificate and endpoint.certificate_login_label:
+            if click_certificate and endpoint.certificate_login_selector:
+                with contextlib.suppress(Exception):
+                    page.wait_for_selector(endpoint.certificate_login_selector, timeout=15_000)
+                    page.locator(endpoint.certificate_login_selector).first.click(timeout=10_000)
+            elif click_certificate and endpoint.certificate_login_label:
                 with contextlib.suppress(Exception):
                     page.get_by_text(endpoint.certificate_login_label, exact=False).first.click(
                         timeout=10_000

@@ -58,7 +58,7 @@ class AdminServiceTests(unittest.TestCase):
             tribunal=1,
             origin=1,
         )
-        with self.assertRaisesRegex(AdminValidationError, "somente processos do TJRJ"):
+        with self.assertRaisesRegex(AdminValidationError, "Aceitos"):
             self.service.register_process(
                 cnj_value=str(other_court),
                 lawyer_reference="adv-demo",

@@ -127,6 +127,7 @@ class PostgresAdminRepository:
         self,
         *,
         cnj: CnjNumber,
+        tribunal: str = "TJRJ",
         lawyer_reference: str,
         sensitivity: Sensitivity,
         actor_id: str,
@@ -182,9 +183,9 @@ class PostgresAdminRepository:
                 INSERT INTO legal_process (
                     id, numero_cnj, tribunal, active, lawyer_id, sensitivity, created_at
                 )
-                VALUES (%s, %s, 'TJRJ', true, %s, %s, %s)
+                VALUES (%s, %s, %s, true, %s, %s, %s)
                 """,
-                (process_id, cnj.digits, lawyer["id"], sensitivity.value, occurred_at),
+                (process_id, cnj.digits, tribunal, lawyer["id"], sensitivity.value, occurred_at),
             )
             connection.execute(
                 """

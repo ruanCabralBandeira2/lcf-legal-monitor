@@ -23,6 +23,7 @@ from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.fake import FakeConnector
 from legal_monitor.connectors.routing import (
     CATALOG,
+    SourceEndpoint,
     UnknownSourceError,
     candidate_sources,
     get_endpoint,
@@ -33,6 +34,8 @@ from legal_monitor.domain.enums import Sensitivity, SessionState, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
 from legal_monitor.monitoring.auth_alert import AuthAlertService, build_approval_message
 from legal_monitor.monitoring.latest import LatestMovementService
+from legal_monitor.monitoring.monitor import MonitorService
+from legal_monitor.monitoring.monitor_repository import PostgresMonitorRepository
 from legal_monitor.monitoring.repository import PostgresManualActionStore
 from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
 from legal_monitor.notifications.discord import (
@@ -457,6 +460,40 @@ def session_watch(source: str, every_minutes: int, max_hours: float, notify: boo
     return 0
 
 
+def monitor_run() -> int:
+    """Rodada completa: login por fonte, leitura, dedupe, download e e-mail (ADR-009)."""
+    settings = Settings.from_env()
+    alerts = _auth_alert_service(settings)
+    operator = _operator_notifier(settings)
+
+    def on_auth_problem(endpoint: SourceEndpoint, state: SessionState) -> None:
+        with contextlib.suppress(Exception):
+            alerts.handle(endpoint, state, now=datetime.now(UTC))
+
+    def on_waiting(endpoint: SourceEndpoint) -> None:
+        if operator is not None:
+            with contextlib.suppress(EmailNotificationError):
+                operator.send(build_approval_message(endpoint, f"approval-{endpoint.key}"))
+
+    service = MonitorService(
+        repository=PostgresMonitorRepository(settings.database_url),
+        sessions=_session_manager(settings),
+        documents=DocumentService(settings.storage_dir, max_bytes=settings.max_document_bytes),
+        lawyer_notifier=(
+            _email_notifier(settings, settings.email_lawyer_to, settings.storage_dir)
+            if settings.email_enabled and settings.email_lawyer_to
+            else None
+        ),
+        on_auth_problem=on_auth_problem,
+        on_waiting_approval=on_waiting,
+        diagnostics_dir=settings.temp_dir / "diagnostico",
+        max_attachment_bytes=settings.email_max_attachment_bytes,
+    )
+    summary = service.run()
+    _emit({"ok": True, **summary.as_dict()})
+    return 0
+
+
 def fetch_latest(number: str, send: bool, source: str | None) -> int:
     settings = Settings.from_env()
     cnj = CnjNumber.parse(number)
@@ -705,6 +742,9 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument("--every", type=int, default=5, help="minutos entre verificações")
     watch_parser.add_argument("--max-hours", type=float, default=12.0)
     watch_parser.add_argument("--notify", action="store_true")
+    subcommands.add_parser(
+        "monitor-run", help="rodada completa: login, leitura, novidades, download e e-mail"
+    )
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -756,6 +796,8 @@ def main(argv: list[str] | None = None) -> int:
             return auth_check(args.source, args.notify)
         if args.command == "session-watch":
             return session_watch(args.source, args.every, args.max_hours, args.notify)
+        if args.command == "monitor-run":
+            return monitor_run()
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

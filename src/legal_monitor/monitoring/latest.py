@@ -56,9 +56,19 @@ def build_movement_message(
     record: DocumentRecord | None,
     *,
     attached: bool,
+    initial: bool = False,
+    extra_documents: int = 0,
 ) -> NotificationMessage:
     text = item.text if len(item.text) <= MAX_MOVEMENT_TEXT else item.text[:MAX_MOVEMENT_TEXT] + "…"
-    lines = [
+    lines = (
+        [
+            "Acompanhamento iniciado. Esta é a movimentação mais recente; a partir de agora você "
+            "recebe apenas as novas.\n"
+        ]
+        if initial
+        else []
+    )
+    lines += [
         f"Processo: {cnj}",
         f"Fonte: {endpoint.notes.split(';')[0]}",
         f"Data: {item.date_text or 'não identificada'}",
@@ -74,9 +84,14 @@ def build_movement_message(
         ]
     else:
         lines.append("Documento: nenhum PDF obtido para esta movimentação")
+    if extra_documents:
+        lines.append(
+            f"Outros {extra_documents} documento(s) desta movimentação guardados no Mac mini/PC."
+        )
     lines.append("\nAtenção: prazo não calculado. Confira sempre no sistema do tribunal.")
+    prefix = "Acompanhamento iniciado" if initial else "Movimentação"
     return NotificationMessage(
-        title=f"[LCF Monitor] Movimentação: {cnj}",
+        title=f"[LCF Monitor] {prefix}: {cnj}",
         body="\n".join(lines),
         correlation_id=f"latest-{cnj.digits}-{record.sha256[:12] if record else 'sem-doc'}",
         demo_only=False,

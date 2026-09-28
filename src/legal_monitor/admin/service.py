@@ -11,6 +11,9 @@ from legal_monitor.domain.enums import Sensitivity
 REFERENCE_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
 
 
+SUPPORTED_TRIBUNALS = {("8", "19"): "TJRJ", ("4", "02"): "TRF2"}
+
+
 class AdminValidationError(ValueError):
     """Entrada administrativa inválida."""
 
@@ -61,8 +64,9 @@ class AdminService:
         now: datetime | None = None,
     ) -> ProcessRecord:
         cnj = CnjNumber.parse(cnj_value)
-        if cnj.tribunal_code != "19":
-            raise AdminValidationError("O MVP aceita somente processos do TJRJ (código 19)")
+        segment = (cnj.digits[13], cnj.tribunal_code)
+        if segment not in SUPPORTED_TRIBUNALS:
+            raise AdminValidationError("Aceitos: TJRJ (8.19) e TRF2 (4.02)")
         lawyer_code = lawyer_reference.strip().lower()
         if not REFERENCE_CODE.fullmatch(lawyer_code):
             raise AdminValidationError("Código do responsável inválido")
@@ -72,6 +76,7 @@ class AdminService:
         occurred_at = now or datetime.now(UTC)
         return self._repository.register_process(
             cnj=cnj,
+            tribunal=SUPPORTED_TRIBUNALS[segment],
             lawyer_reference=lawyer_code,
             sensitivity=sensitivity,
             actor_id=actor,

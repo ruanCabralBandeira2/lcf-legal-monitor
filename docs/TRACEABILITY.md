@@ -14,7 +14,7 @@
 | Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004, `tests/test_manual_action_postgres.py` | implementado; migração 004 validada no PostgreSQL; login com token real pendente (Windows/Edge) |
 | Ambiente Windows-first e plano de migração ao Mac | `docs/runbooks/AMBIENTE_WINDOWS.md` | validado em 28/09/2026 |
 | Parser/download eproc | ADR-007 | não iniciado; depende de HTML real sanitizado |
-| Canal e-mail | `legal_monitor.notifications.email`, `secret-set`, `email-test`, `docs/runbooks/EMAIL.md` | implementado; envio real pendente da senha de app |
+| Canal e-mail | `legal_monitor.notifications.email`, `secret-set`, `email-test`, `docs/runbooks/EMAIL.md` | implementado; envio real validado em 28/09/2026 (email-test) |
 | DJEN produção | host guard implementado; cliente real no M6 | parcial |
 | Prova de notificação | `legal_monitor.notifications`, `docs/runbooks/DEMO_NOTIFICATION.md` | entrega externa Discord validada em 31/08/2026 com segredo no Keychain e PDF fictício; uso jurídico continua bloqueado |
 | Discord/outbox operacional | `docs/backlog/DISCORD_OPERACIONAL.md` | desenho registrado; bloqueado por M0/M8 |

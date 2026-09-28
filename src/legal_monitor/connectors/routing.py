@@ -119,7 +119,8 @@ CATALOG: dict[str, SourceEndpoint] = {
             system=SourceSystem.PJE,
             base_url="https://pje.trt1.jus.br/primeirograu/login.seam",
             auth_realm="trt1",
-            notes="PJe-JT TRT1 1º grau; login próprio do PJe trabalhista",
+            headless_blocked=True,
+            notes="PJe-JT TRT1 1º grau (PJe-KZ); login via SSO Jus.br; 403 a navegador headless",
             certificate_login_label="certificado",
         ),
         SourceEndpoint(
@@ -128,7 +129,8 @@ CATALOG: dict[str, SourceEndpoint] = {
             system=SourceSystem.PJE,
             base_url="https://pje.trt1.jus.br/segundograu/login.seam",
             auth_realm="trt1",
-            notes="PJe-JT TRT1 2º grau; login próprio do PJe trabalhista",
+            headless_blocked=True,
+            notes="PJe-JT TRT1 2º grau (PJe-KZ); login via SSO Jus.br; 403 a navegador headless",
             certificate_login_label="certificado",
         ),
         SourceEndpoint(

@@ -52,7 +52,7 @@ class DocumentServiceTests(unittest.TestCase):
         self.assertTrue(first.storage_path.exists())
         self.assertFalse(first.already_existed)
         self.assertTrue(second.already_existed)
-        self.assertIn("tjrj/2026/00000016920268190001", str(first.storage_path))
+        self.assertIn("tjrj/2026/00000016920268190001", first.storage_path.as_posix())
 
     def test_rejects_non_pdf(self) -> None:
         source = self.root / "malicious.pdf"
@@ -69,7 +69,10 @@ class DocumentServiceTests(unittest.TestCase):
         original = self.root / "original.pdf"
         original.write_bytes(blank_pdf_bytes())
         link = self.root / "link.pdf"
-        link.symlink_to(original)
+        try:
+            link.symlink_to(original)
+        except OSError:
+            self.skipTest("Sistema sem permissão para criar links simbólicos (Windows)")
         with self.assertRaisesRegex(DocumentValidationError, "simbólicos"):
             DocumentService(self.root / "documents").store_pdf(
                 link,

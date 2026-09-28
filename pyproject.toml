@@ -4,18 +4,22 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lcf-legal-monitor"
-version = "0.6.0"
+version = "0.7.0"
 description = "Fundação local do robô de monitoramento jurídico da LCF Advogados"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 license = { text = "Proprietary" }
 authors = [{ name = "LCF Advogados" }]
 dependencies = [
+  "keyring==25.7.0",
   "psycopg[binary]==3.3.4",
   "pypdf==6.10.0",
 ]
 
 [project.optional-dependencies]
+browser = [
+  "playwright==1.63.0",
+]
 dev = [
   "pytest==9.1.1",
   "ruff==0.16.5",

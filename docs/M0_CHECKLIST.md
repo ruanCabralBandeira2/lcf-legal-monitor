@@ -2,13 +2,20 @@
 
 Nenhum conector real deve ser ativado antes de este checklist ser aprovado por responsáveis técnicos e jurídicos.
 
+## Registro de 28/09/2026
+
+- Autorização da LCF confirmada pelo responsável técnico, com evidência guardada fora do Git. Acesso por conta de advogado e certificado em token USB; o responsável técnico mantém o autenticador de 2FA no próprio celular, com anuência do advogado.
+- Sistemas iniciais: eproc TJRJ, eproc TRF2 e PDPJ-Br (ADR-007).
+- Entrega inicial: e-mail (teste com endereço pessoal do operador) e pasta no Mac mini. Telefone adiado.
+- `M0_APPROVED=true` somente no `.env` local; `REAL_CONNECTORS_ENABLED` continua `false` até o primeiro conector eproc passar nos testes com fixture sanitizada.
+
 ## Decisões bloqueantes
 
 - [ ] Processo-piloto e sistema atual (DCP, PJe ou eproc), com ambiente de teste autorizado.
-- [ ] Autorização escrita da LCF para monitorar, baixar, armazenar e resumir somente processos de uma lista fechada.
+- [x] Autorização da LCF para monitorar, baixar, armazenar e enviar peças (28/09/2026).
 - [ ] Até cinco processos-piloto preferencialmente não sigilosos, compartilhados por canal seguro e nunca registrados no Git.
-- [ ] Usuário técnico, operador/autenticador primário e substituto.
-- [ ] Sistema inicial e URL oficial confirmados; esclarecer se "TCRJ" significa TJRJ, TRT-1/RJ, TRF2 ou outro serviço.
+- [x] Operador/autenticador primário: responsável técnico (token USB + 2FA no celular). Substituto pendente.
+- [x] Sistemas iniciais e URLs oficiais: eproc TJRJ, eproc TRF2, PDPJ-Br (ADR-007).
 - [ ] Base legal, sigilo, perfis de acesso e termos de uso de cada fonte revisados.
 - [ ] Termo do DataJud revisado, inclusive restrição não comercial; compatibilidade do uso pretendido aprovada e aceite registrado antes de qualquer consulta.
 - [ ] SLA interno de detecção e de ação humana por processo.

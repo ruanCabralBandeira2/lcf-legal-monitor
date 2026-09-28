@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import importlib.util
 import json
 import platform
@@ -14,22 +15,37 @@ from typing import Any
 from legal_monitor import __version__
 from legal_monitor.admin.repository import AdminRepositoryError, PostgresAdminRepository
 from legal_monitor.admin.service import AdminService, AdminValidationError
+from legal_monitor.browser.session import BrowserSessionManager, BrowserUnavailableError
 from legal_monitor.config import ConfigError, Settings
 from legal_monitor.connectors.fake import FakeConnector
+from legal_monitor.connectors.routing import (
+    CATALOG,
+    UnknownSourceError,
+    candidate_sources,
+    get_endpoint,
+)
 from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber, InvalidCnjNumber
-from legal_monitor.domain.enums import Sensitivity, SourceSystem
+from legal_monitor.domain.enums import Sensitivity, SessionState, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
+from legal_monitor.monitoring.auth_alert import AuthAlertService, build_approval_message
+from legal_monitor.monitoring.repository import PostgresManualActionStore
 from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
 from legal_monitor.notifications.discord import (
     DiscordNotificationError,
     DiscordWebhookNotifier,
+)
+from legal_monitor.notifications.email import (
+    EmailNotificationError,
+    EmailNotifier,
+    SmtpSslTransport,
 )
 from legal_monitor.notifications.fake import FakeNotifier
 from legal_monitor.notifications.keychain import KeychainSecretError, MacOSKeychainSecretProvider
 from legal_monitor.scheduler.policy import RetryPolicy
 from legal_monitor.scheduler.repository import PostgresSchedulerRepository
 from legal_monitor.scheduler.worker import SchedulerWorker
+from legal_monitor.secrets import KeyringSecretStore, SecretStoreError
 from legal_monitor.summaries.fake import FAKE_EXTRACTED_DOCUMENT, FakeSummaryProvider
 from legal_monitor.summaries.service import SummaryService
 
@@ -45,6 +61,8 @@ def doctor() -> int:
         "architecture": platform.machine(),
         "pypdf": importlib.util.find_spec("pypdf") is not None,
         "psycopg": importlib.util.find_spec("psycopg") is not None,
+        "keyring": importlib.util.find_spec("keyring") is not None,
+        "playwright": importlib.util.find_spec("playwright") is not None,
     }
     try:
         settings = Settings.from_env()
@@ -63,6 +81,12 @@ def doctor() -> int:
                 "discord_secret_store": "macos-keychain",
                 "m0_approved": settings.m0_approved,
                 "summary_enabled": settings.summary_enabled,
+                "email_enabled": settings.email_enabled,
+                "email_recipients": {
+                    "lawyer": len(settings.email_lawyer_to),
+                    "operator": len(settings.email_operator_to),
+                },
+                "browser_channel": settings.browser_channel or "chromium",
             }
         )
     except (ConfigError, OSError) as exc:
@@ -226,6 +250,156 @@ def summary_demo() -> int:
         }
     )
     return 0
+
+
+def secret_set(name: str) -> int:
+    settings = Settings.from_env()
+    accounts = {"smtp": settings.smtp_username}
+    account = accounts.get(name)
+    if not account:
+        raise ConfigError(f"Segredo {name!r} desconhecido ou conta não configurada no .env")
+    value = getpass.getpass(f"Cole o valor de {name!r} para {account} (não aparece na tela): ")
+    KeyringSecretStore().set(name, account, value.strip())
+    _emit({"ok": True, "secret": name, "account": account, "stored_in": "cofre do sistema"})
+    return 0
+
+
+def _email_notifier(settings: Settings, recipients: tuple[str, ...], root: Path) -> EmailNotifier:
+    if not settings.email_enabled:
+        raise ConfigError("E-mail desativado; configure EMAIL_ENABLED=true no .env")
+    password = KeyringSecretStore().get("smtp", settings.smtp_username)
+    return EmailNotifier(
+        sender=settings.email_from,
+        recipients=recipients,
+        transport=SmtpSslTransport(
+            settings.smtp_host, settings.smtp_port, settings.smtp_username, password
+        ),
+        allowed_attachment_root=root,
+        maximum_attachment_bytes=settings.email_max_attachment_bytes,
+    )
+
+
+def email_test(group: str) -> int:
+    settings = Settings.from_env()
+    recipients = settings.email_operator_to if group == "operator" else settings.email_lawyer_to
+    with tempfile.TemporaryDirectory(prefix="legal-monitor-email-test-") as temporary:
+        root = Path(temporary)
+        attachment_path = root / "prova_ficticia.pdf"
+        attachment_path.write_bytes(_example_pdf())
+        receipt = _email_notifier(settings, recipients, root).send(
+            NotificationMessage(
+                title="[LCF Monitor] Teste de envio",
+                body=(
+                    "Processo: *******-**.2026.*.**.****\n"
+                    "Origem: TESTE (sem acesso a tribunal)\n"
+                    "Movimentação: fictícia\n"
+                    "Anexo: prova_ficticia.pdf (PDF em branco)\n\n"
+                    "Se você recebeu este e-mail, o canal está funcionando."
+                ),
+                correlation_id="email-test",
+                demo_only=True,
+                attachments=(
+                    NotificationAttachment(path=attachment_path, filename="prova_ficticia.pdf"),
+                ),
+            )
+        )
+    _emit(
+        {
+            "ok": True,
+            "channel": receipt.channel,
+            "recipients": len(recipients),
+            "real_process_data_used": False,
+        }
+    )
+    return 0
+
+
+def sources_for(number: str) -> int:
+    cnj = CnjNumber.parse(number)
+    _emit(
+        {
+            "process": cnj.masked(),
+            "sources": [
+                {"key": item.key, "tribunal": item.tribunal, "url": item.base_url}
+                for item in candidate_sources(cnj)
+            ],
+        }
+    )
+    return 0
+
+
+def _session_manager(settings: Settings, *, headless: bool | None = None) -> BrowserSessionManager:
+    return BrowserSessionManager(
+        settings.browser_profile_dir,
+        headless=settings.browser_headless if headless is None else headless,
+        channel=settings.browser_channel,
+    )
+
+
+def _operator_notifier(settings: Settings) -> EmailNotifier | None:
+    if settings.email_enabled and settings.email_operator_to:
+        return _email_notifier(settings, settings.email_operator_to, settings.temp_dir)
+    return None
+
+
+def _auth_alert_service(settings: Settings) -> AuthAlertService:
+    return AuthAlertService(
+        PostgresManualActionStore(settings.database_url), _operator_notifier(settings)
+    )
+
+
+def auth_open(source: str, click_certificate: bool) -> int:
+    settings = Settings.from_env()
+    endpoint = get_endpoint(source)
+    notifier = _operator_notifier(settings)
+    print(
+        f"Abrindo {endpoint.base_url} com o token USB. Escolha o certificado, digite o PIN se "
+        "pedir e aprove o 2FA no celular. A janela fecha sozinha quando a sessão ficar válida.",
+        file=sys.stderr,
+    )
+
+    def on_waiting() -> None:
+        print("Aguardando aprovação do 2FA no celular...", file=sys.stderr)
+        if notifier is not None:
+            notifier.send(build_approval_message(endpoint, f"approval-{endpoint.key}"))
+
+    result = _session_manager(settings, headless=False).login(
+        endpoint,
+        click_certificate=click_certificate,
+        on_waiting_approval=on_waiting,
+    )
+    payload: dict[str, Any] = {"source": result.source, "session": result.state.value}
+    if result.state is SessionState.VALID:
+        try:
+            outcome = _auth_alert_service(settings).handle(
+                endpoint, result.state, now=datetime.now(UTC)
+            )
+            payload["resolved_actions"] = outcome.resolved_actions
+        except Exception as exc:
+            payload["audit_warning"] = f"banco indisponível ({type(exc).__name__})"
+    _emit(payload)
+    return 0 if result.state is SessionState.VALID else 1
+
+
+def auth_check(source: str | None, notify: bool) -> int:
+    settings = Settings.from_env()
+    endpoints = [get_endpoint(source)] if source else list(CATALOG.values())
+    manager = _session_manager(settings)
+    results = []
+    all_valid = True
+    for endpoint in endpoints:
+        check = manager.check(endpoint)
+        entry: dict[str, Any] = {"source": check.source, "session": check.state.value}
+        if check.state is not SessionState.VALID:
+            all_valid = False
+        if notify:
+            outcome = _auth_alert_service(settings).handle(
+                endpoint, check.state, now=datetime.now(UTC)
+            )
+            entry.update({"action_opened": outcome.action_opened, "notified": outcome.notified})
+        results.append(entry)
+    _emit({"sessions": results})
+    return 0 if all_valid else 1
 
 
 def _scheduler_components() -> tuple[Settings, PostgresSchedulerRepository, RetryPolicy]:
@@ -425,6 +599,32 @@ def build_parser() -> argparse.ArgumentParser:
     )
     deactivate_parser.add_argument("number")
     deactivate_parser.add_argument("--actor", default="local-admin")
+    secret_parser = subcommands.add_parser(
+        "secret-set", help="grava um segredo no cofre do sistema, digitado sem eco"
+    )
+    secret_parser.add_argument("name", choices=["smtp"])
+    email_parser = subcommands.add_parser(
+        "email-test", help="envia e-mail fictício com PDF em branco para validar o canal"
+    )
+    email_parser.add_argument("--to", choices=["operator", "lawyer"], default="operator")
+    sources_parser = subcommands.add_parser(
+        "sources-for", help="mostra as fontes candidatas de um número CNJ, sem rede"
+    )
+    sources_parser.add_argument("number")
+    auth_open_parser = subcommands.add_parser(
+        "auth-open", help="abre janela visível para login humano com 2FA e salva a sessão"
+    )
+    auth_open_parser.add_argument("source", choices=sorted(CATALOG))
+    auth_open_parser.add_argument(
+        "--no-certificate",
+        action="store_true",
+        help="não clica em 'Certificado Digital'; a pessoa escolhe o método na tela",
+    )
+    auth_check_parser = subcommands.add_parser(
+        "auth-check", help="verifica sessões salvas; --notify avisa o operador se expiraram"
+    )
+    auth_check_parser.add_argument("source", nargs="?", choices=sorted(CATALOG))
+    auth_check_parser.add_argument("--notify", action="store_true")
     return parser
 
 
@@ -457,13 +657,27 @@ def main(argv: list[str] | None = None) -> int:
             return admin_list_processes(args.include_inactive)
         if args.command == "admin-deactivate-process":
             return admin_deactivate_process(args.number, args.actor)
+        if args.command == "secret-set":
+            return secret_set(args.name)
+        if args.command == "email-test":
+            return email_test(args.to)
+        if args.command == "sources-for":
+            return sources_for(args.number)
+        if args.command == "auth-open":
+            return auth_open(args.source, not args.no_certificate)
+        if args.command == "auth-check":
+            return auth_check(args.source, args.notify)
     except (
         AdminRepositoryError,
         AdminValidationError,
+        BrowserUnavailableError,
         ConfigError,
         DiscordNotificationError,
+        EmailNotificationError,
         InvalidCnjNumber,
         KeychainSecretError,
+        SecretStoreError,
+        UnknownSourceError,
     ) as exc:
         _emit({"ok": False, "error_type": type(exc).__name__, "error": str(exc)})
         return 1

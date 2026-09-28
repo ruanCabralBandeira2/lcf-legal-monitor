@@ -5,6 +5,7 @@ class SourceSystem(StrEnum):
     LEGACY_DCP = "LEGACY_DCP"
     PJE = "PJE"
     EPROC = "EPROC"
+    PDPJ = "PDPJ"
     UNKNOWN = "UNKNOWN"
     MIGRATING = "MIGRATING"
     FAKE = "FAKE"

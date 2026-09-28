@@ -76,6 +76,17 @@ class Settings:
     scheduler_base_backoff_seconds: int
     scheduler_max_backoff_seconds: int
     worker_stale_seconds: int
+    email_enabled: bool = False
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 465
+    smtp_username: str = ""
+    email_from: str = ""
+    email_lawyer_to: tuple[str, ...] = ()
+    email_operator_to: tuple[str, ...] = ()
+    email_max_attachment_bytes: int = 20_971_520
+    browser_profile_dir: Path = Path("browser_profiles")
+    browser_headless: bool = True
+    browser_channel: str = "chrome"
 
     @classmethod
     def from_env(
@@ -100,6 +111,9 @@ class Settings:
             storage_dir = root / storage_dir
         if not temp_dir.is_absolute():
             temp_dir = root / temp_dir
+        browser_profile_dir = Path(merged.get("BROWSER_PROFILE_DIR", "./browser_profiles"))
+        if not browser_profile_dir.is_absolute():
+            browser_profile_dir = root / browser_profile_dir
 
         try:
             max_bytes = int(merged.get("MAX_DOCUMENT_BYTES", "52428800"))
@@ -172,6 +186,23 @@ class Settings:
                 minimum=60,
                 maximum=86_400,
             ),
+            email_enabled=_parse_bool(merged.get("EMAIL_ENABLED")),
+            smtp_host=merged.get("SMTP_HOST", "smtp.gmail.com").strip(),
+            smtp_port=_parse_int(merged, "SMTP_PORT", default=465, minimum=1, maximum=65_535),
+            smtp_username=merged.get("SMTP_USERNAME", "").strip(),
+            email_from=merged.get("EMAIL_FROM", merged.get("SMTP_USERNAME", "")).strip(),
+            email_lawyer_to=_parse_list(merged.get("EMAIL_LAWYER_TO")),
+            email_operator_to=_parse_list(merged.get("EMAIL_OPERATOR_TO")),
+            email_max_attachment_bytes=_parse_int(
+                merged,
+                "EMAIL_MAX_ATTACHMENT_BYTES",
+                default=20_971_520,
+                minimum=1_048_576,
+                maximum=26_214_400,
+            ),
+            browser_profile_dir=browser_profile_dir.resolve(),
+            browser_headless=_parse_bool(merged.get("BROWSER_HEADLESS"), default=True),
+            browser_channel=merged.get("BROWSER_CHANNEL", "chrome").strip(),
         )
         settings.validate()
         return settings
@@ -211,6 +242,21 @@ class Settings:
             raise ConfigError(
                 "SCHEDULER_BASE_BACKOFF_SECONDS não pode exceder SCHEDULER_MAX_BACKOFF_SECONDS"
             )
+        if self.email_enabled:
+            if not self.smtp_host or not self.smtp_username or not self.email_from:
+                raise ConfigError("EMAIL_ENABLED exige SMTP_HOST, SMTP_USERNAME e EMAIL_FROM")
+            if not self.email_lawyer_to and not self.email_operator_to:
+                raise ConfigError("EMAIL_ENABLED exige EMAIL_LAWYER_TO ou EMAIL_OPERATOR_TO")
+        if self.browser_channel not in ("", "chrome", "chrome-beta", "msedge"):
+            raise ConfigError("BROWSER_CHANNEL deve ser vazio, chrome, chrome-beta ou msedge")
+        if self.browser_profile_dir in (self.storage_dir, self.temp_dir):
+            raise ConfigError("BROWSER_PROFILE_DIR precisa ser separado dos documentos")
+
+
+def _parse_list(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
 def _parse_int(

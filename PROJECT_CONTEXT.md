@@ -1,6 +1,6 @@
 # Contexto atual do projeto
 
-Atualizado em 31/08/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
+Atualizado em 28/09/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
 
 ## Missão
 
@@ -17,7 +17,9 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 
 ## Estado executivo
 
-- Repositório privado: `ruanCabralBandeira2/lcf-legal-monitor`.
+- **28/09/2026: autorização da LCF recebida** (conta de advogado, token USB, 2FA aprovado pelo responsável técnico no celular). Direção do produto no ADR-007. Versão 0.7.0 entrega roteamento CNJ -> fonte, sessão por token com aviso de 2FA e canal e-mail.
+- Repositório: `ruanCabralBandeira2/lcf-legal-monitor` (tornado público em 28/09/2026 para leitura; avaliar voltar a privado).
+- Desenvolvimento também no Windows (`C:\Users\ruanf\Documents\lcf-legal-monitor`, Python 3.12.10 em `.venv`, Git 2.55); sem Docker/PostgreSQL no Windows, então testes PostgreSQL são pulados lá e rodam no CI e no Mac.
 - Branch estável: `main`; desenvolvimento ocorre em branches `codex/*` com CI antes da integração.
 - Hospedagem: Mac Apple Silicon, aplicação local e PostgreSQL 17.11 no Docker.
 - Runtime: Python 3.12.13 em `.venv`; dependências fixadas em `requirements.lock`.
@@ -43,6 +45,13 @@ Para cada processo expressamente autorizado e vinculado à LCF, o produto dever�
 7. encaminhar o alerta ao advogado responsável pelo canal aprovado;
 8. exigir revisão humana sempre que houver sigilo, ambiguidade, falha de acesso, CAPTCHA, 2FA ou divergência entre fontes.
 
+### Direção definida em 28/09/2026 (ADR-007)
+
+- Entrada: número CNJ. Roteamento local por `J.TR`: `8.19` -> eproc TJRJ 1g/2g, PDPJ; `4.02` -> eproc TRF2, PDPJ. eproc TJRJ e PDPJ usam o mesmo login Jus.br.
+- Movimentação nova -> baixar os documentos do evento e, quando possível, o PDF integral dos autos.
+- Entrega agora: e-mail + pasta no Mac mini. Telefone depois. Bot Discord do usuário: candidato apenas a avisos operacionais.
+- Login: token USB no Mac mini + Chrome instalado. O robô clica em "Certificado Digital"; PIN e 2FA são humanos. Se travar no 2FA, envia e-mail "aprove no celular" e retoma sozinho.
+
 DataJud poderá servir como sinal auxiliar de capa e movimentação após aprovação do termo. O PDF continuará dependendo de acesso autorizado ao PJe, eproc ou DCP/legado. A identificação de "o que foi decidido" deverá apontar a peça e as páginas de origem, diferenciar texto extraído de inferência e assumir estado `REVIEW_REQUIRED` quando a confiança for insuficiente.
 
 ## O que já existe
@@ -67,12 +76,17 @@ DataJud poderá servir como sinal auxiliar de capa e movimentação após aprova
 - Pesquisa DataJud registrada em `docs/research/DATAJUD_API.md` e ADR-005: futuro uso apenas como gatilho/metadata; peça virá do conector autorizado.
 - Backlog do Discord operacional registrado em `docs/backlog/DISCORD_OPERACIONAL.md`; intenção do usuário anotada sem liberar dados reais.
 - Mensagem não técnica para obter autorização e dados mínimos do piloto registrada em `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md`, sem solicitar credenciais no grupo.
+- `legal_monitor.connectors.routing`: catálogo oficial (eproc TJRJ 1g/2g, eproc TRF2, PDPJ) e fontes candidatas por CNJ; comando `sources-for`.
+- `legal_monitor.browser.session`: Playwright/Chrome com `storage_state` por realm; `auth-open` (token + aviso de aprovação no celular) e `auth-check [--notify]`.
+- `legal_monitor.monitoring`: `AuthAlertService` abre uma `manual_action` por fonte e avisa o operador uma vez; sessão válida resolve e rearma.
+- `legal_monitor.notifications.email`: SMTP SSL com PDF validado; senha no cofre do sistema via `keyring` (`secret-set smtp`); comando `email-test`.
+- Migração `004`: `PDPJ` como sistema, `EMAIL` como canal e índice de ação manual única por fonte.
 - Contrato `legal_monitor.summaries` recusa fatos sem evidência verificável, mantém `REVIEW_REQUIRED`, nunca calcula prazo e possui somente provedor fake restrito à fixture.
 
 ## Travas vigentes
 
-- `M0_APPROVED=false`
-- `REAL_CONNECTORS_ENABLED=false`
+- `M0_APPROVED=true` somente no `.env` local após a autorização de 28/09/2026; o padrão do código continua `false`.
+- `REAL_CONNECTORS_ENABLED=false` até o conector eproc passar nos testes com fixture sanitizada.
 - `WHATSAPP_ENABLED=false`
 - `SUMMARY_ENABLED=false`
 - `DISCORD_DEMO_ENABLED=false`
@@ -143,6 +157,17 @@ Instruções e limites: `docs/runbooks/SUMMARY_DEMO.md`.
 
 ## Próxima sequência segura
 
+Agora (pós-autorização):
+
+1. Operador cria senha de app Gmail, roda `legal-monitor secret-set smtp` e `legal-monitor email-test`.
+2. No Mac mini: token USB + Chrome + `pip install -e .[browser]` + `legal-monitor auth-open eproc-tjrj-1g`; validar se o seletor de certificado aparece sob Playwright (senão, plano CDP do ADR-007).
+3. Com sessão válida, capturar HTML de um processo autorizado (lista de eventos e documentos), sanitizar e escrever o parser eproc compartilhado TJRJ/TRF2 (M4c).
+4. Job `MONITOR_PROCESS`: sessão -> movimentos -> novos -> download -> `DocumentService` -> e-mail ao advogado (M5/M6).
+5. launchd no Mac mini rodando `auth-check --notify` e o worker; pasta `storage/documents` compartilhada por SMB.
+6. Discord operacional (avisos sem dado jurídico) e telefone depois.
+
+Histórico da sequência de autorização (itens 1-8 abaixo, parcialmente superados em 28/09/2026):
+
 1. Confirmar a revogação de todo webhook que apareceu em conversa e revisar participantes/retenção do canal de demonstração.
 2. Obter autorização escrita da LCF para um piloto somente de leitura, com até cinco processos não sigilosos e uma lista fechada de advogados/processos.
 3. Confirmar o primeiro sistema e a URL oficial: TJRJ/PJe, Portal de Serviços/DCP, TRT-1, TRF2/eproc ou outro; esclarecer a sigla "TCRJ".
@@ -155,6 +180,8 @@ Instruções e limites: `docs/runbooks/SUMMARY_DEMO.md`.
 A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/MENSAGEM_GRUPO_PILOTO_LCF.md`. Até a resposta do escritório, o trabalho seguro possível limita-se a fixtures, contratos internos, testes e documentação; não há base para escolher ou ativar um conector real.
 
 ## Última validação conhecida
+
+- 28/09/2026, Windows, versão 0.7.0: 78 testes aprovados, 6 ignorados (PostgreSQL ausente e symlink no Windows); Ruff e formatação aprovados; `sources-for` e `doctor` conferidos. Migração 004 ainda não aplicada em PostgreSQL real (CI/Mac).
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
 - Versão 0.6.0: contrato de resumo factual e comando `summary-demo` adicionados sem liberar o M0.

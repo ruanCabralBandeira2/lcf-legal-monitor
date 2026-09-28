@@ -10,7 +10,10 @@
 | Domínio CNJ e estados | `legal_monitor.domain` | implementado antecipadamente |
 | Connector SDK/fake | `legal_monitor.connectors` | implementado antecipadamente |
 | Documento/integração | `legal_monitor.documents` | fatia segura implementada |
-| TJRJ real/router/Playwright | bloqueado por M0 e M4-M5 | não iniciado |
+| Router CNJ -> fontes (eproc TJRJ, eproc TRF2, PDPJ) | `legal_monitor.connectors.routing`, `sources-for`, ADR-007 | implementado e testado |
+| Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004 | implementado; validação com token real pendente no Mac mini |
+| Parser/download eproc | ADR-007 | não iniciado; depende de HTML real sanitizado |
+| Canal e-mail | `legal_monitor.notifications.email`, `secret-set`, `email-test`, `docs/runbooks/EMAIL.md` | implementado; envio real pendente da senha de app |
 | DJEN produção | host guard implementado; cliente real no M6 | parcial |
 | Prova de notificação | `legal_monitor.notifications`, `docs/runbooks/DEMO_NOTIFICATION.md` | entrega externa Discord validada em 31/08/2026 com segredo no Keychain e PDF fictício; uso jurídico continua bloqueado |
 | Discord/outbox operacional | `docs/backlog/DISCORD_OPERACIONAL.md` | desenho registrado; bloqueado por M0/M8 |

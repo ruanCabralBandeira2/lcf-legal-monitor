@@ -25,3 +25,7 @@ logs/*
 !storage/tmp/.gitkeep
 !storage/backups/.gitkeep
 !logs/.gitkeep
+
+# Carteira real de processos (números processuais nunca entram no Git).
+storage/carteira/*
+!storage/carteira/.gitkeep

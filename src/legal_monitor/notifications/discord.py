@@ -240,6 +240,8 @@ class DiscordWebhookNotifier:
             )
         if len(message.attachments) > 1:
             raise ValueError("A prova Discord aceita no máximo um anexo fictício")
+        if len(message.render_text()) > 2_000:
+            raise ValueError("Mensagem Discord excede o limite de 2.000 caracteres")
         if message.attachments and self._allowed_attachment_root is None:
             raise ValueError("Anexo Discord exige diretório temporário explicitamente permitido")
         payload = {

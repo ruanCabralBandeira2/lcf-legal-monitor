@@ -58,7 +58,7 @@ CATALOG: dict[str, SourceEndpoint] = {
             system=SourceSystem.EPROC,
             base_url="https://eproc2g.tjrj.jus.br/eproc/",
             auth_realm="jusbr",
-            notes="eproc TJRJ 2º grau; endereço a confirmar no primeiro login",
+            notes="eproc TJRJ 2º grau; login via SSO Jus.br (endereço conferido em 28/09/2026)",
             certificate_login_label="Certificado Digital",
         ),
         SourceEndpoint(
@@ -82,12 +82,47 @@ CATALOG: dict[str, SourceEndpoint] = {
             headless_blocked=True,
         ),
         SourceEndpoint(
+            key="eproc-jfrj-1g",
+            tribunal="TRF2",
+            system=SourceSystem.EPROC,
+            base_url="https://eproc.jfrj.jus.br/eproc/",
+            auth_realm="jfrj",
+            notes="eproc Justiça Federal do RJ 1º grau (TRF2); login OAB + senha + 2FA",
+        ),
+        SourceEndpoint(
             key="eproc-trf2",
             tribunal="TRF2",
             system=SourceSystem.EPROC,
             base_url="https://eproc.trf2.jus.br/eproc/",
             auth_realm="trf2",
-            notes="eproc TRF2; login OAB (RJ000000) + senha + 2FA próprio",
+            notes="eproc TRF2 2º grau; login OAB (RJ000000) + senha + 2FA próprio",
+        ),
+        SourceEndpoint(
+            key="eproc-trf4-2g",
+            tribunal="TRF4",
+            system=SourceSystem.EPROC,
+            base_url="https://eproc.trf4.jus.br/eproc2trf4/",
+            auth_realm="jusbr",
+            notes="eproc TRF4 2º grau; SSO Jus.br; exige cadastro do advogado no TRF4",
+            certificate_login_label="Certificado Digital",
+        ),
+        SourceEndpoint(
+            key="pje-trt1-1g",
+            tribunal="TRT1",
+            system=SourceSystem.PJE,
+            base_url="https://pje.trt1.jus.br/primeirograu/login.seam",
+            auth_realm="trt1",
+            notes="PJe-JT TRT1 1º grau; login próprio do PJe trabalhista",
+            certificate_login_label="certificado",
+        ),
+        SourceEndpoint(
+            key="pje-trt1-2g",
+            tribunal="TRT1",
+            system=SourceSystem.PJE,
+            base_url="https://pje.trt1.jus.br/segundograu/login.seam",
+            auth_realm="trt1",
+            notes="PJe-JT TRT1 2º grau; login próprio do PJe trabalhista",
+            certificate_login_label="certificado",
         ),
         SourceEndpoint(
             key="pdpj",
@@ -101,14 +136,39 @@ CATALOG: dict[str, SourceEndpoint] = {
     )
 }
 
-# Segmento J.TR do número CNJ -> fontes candidatas, em ordem de preferência.
-_ROUTES: dict[tuple[str, str], tuple[str, ...]] = {
-    # Sequencial iniciado em "08" costuma nascer no PJe TJRJ; a ordem aqui é só preferência,
-    # a descoberta real registra a fonte que encontrou o processo.
-    ("8", "19"): ("eproc-tjrj-1g", "pje-tjrj-1g", "eproc-tjrj-2g", "pje-tjrj-2g", "pdpj"),
-    ("4", "02"): ("eproc-trf2", "pdpj"),
-}
+# Sequencial a partir de 0800000 é a faixa de numeração do PJe TJRJ.
+PJE_TJRJ_SEQUENCE_START = 800_000
 _FALLBACK: tuple[str, ...] = ("pdpj",)
+# Tribunais que o robô sabe rotear (J, TR) -> sigla.
+SUPPORTED_TRIBUNALS: dict[tuple[str, str], str] = {
+    ("8", "19"): "TJRJ",
+    ("4", "02"): "TRF2",
+    ("4", "04"): "TRF4",
+    ("5", "01"): "TRT1",
+}
+
+
+def candidate_keys(cnj: CnjNumber) -> tuple[str, ...]:
+    """Ordem de preferência das fontes. É só preferência: a descoberta real registra onde
+    o processo foi encontrado (`source_key`), e as rodadas seguintes vão direto nela."""
+    justice, tribunal = cnj.digits[13], cnj.tribunal_code
+    origin, sequence = cnj.digits[16:20], int(cnj.digits[0:7])
+    second_instance = origin == "0000"
+    if (justice, tribunal) == ("8", "19"):
+        instances = ("2g", "1g") if second_instance else ("1g", "2g")
+        systems = ("pje", "eproc") if sequence >= PJE_TJRJ_SEQUENCE_START else ("eproc", "pje")
+        return (*(f"{system}-tjrj-{i}" for i in instances for system in systems), "pdpj")
+    if (justice, tribunal) == ("4", "02"):
+        pair = (
+            ("eproc-trf2", "eproc-jfrj-1g") if second_instance else ("eproc-jfrj-1g", "eproc-trf2")
+        )
+        return (*pair, "pdpj")
+    if (justice, tribunal) == ("4", "04"):
+        return ("eproc-trf4-2g", "pdpj") if second_instance else _FALLBACK
+    if (justice, tribunal) == ("5", "01"):
+        pair = ("pje-trt1-2g", "pje-trt1-1g") if second_instance else ("pje-trt1-1g", "pje-trt1-2g")
+        return (*pair, "pdpj")
+    return _FALLBACK
 
 
 def get_endpoint(key: str) -> SourceEndpoint:
@@ -122,10 +182,8 @@ def get_endpoint(key: str) -> SourceEndpoint:
 
 def candidate_sources(cnj: CnjNumber) -> tuple[SourceEndpoint, ...]:
     """Roteamento local, sem rede: o número CNJ indica justiça e tribunal."""
-    justice = cnj.digits[13]
-    keys = _ROUTES.get((justice, cnj.tribunal_code), _FALLBACK)
-    return tuple(CATALOG[key] for key in keys)
+    return tuple(CATALOG[key] for key in candidate_keys(cnj))
 
 
-def tribunal_for(cnj: CnjNumber) -> str:
-    return candidate_sources(cnj)[0].tribunal
+def tribunal_for(cnj: CnjNumber) -> str | None:
+    return SUPPORTED_TRIBUNALS.get((cnj.digits[13], cnj.tribunal_code))

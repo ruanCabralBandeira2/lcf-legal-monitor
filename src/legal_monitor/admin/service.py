@@ -5,13 +5,11 @@ from datetime import UTC, datetime
 
 from legal_monitor.admin.models import DeactivationResult, LawyerRecord, ProcessRecord
 from legal_monitor.admin.repository import PostgresAdminRepository
+from legal_monitor.connectors.routing import SUPPORTED_TRIBUNALS
 from legal_monitor.domain.cnj import CnjNumber
 from legal_monitor.domain.enums import Sensitivity
 
 REFERENCE_CODE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
-
-
-SUPPORTED_TRIBUNALS = {("8", "19"): "TJRJ", ("4", "02"): "TRF2"}
 
 
 class AdminValidationError(ValueError):
@@ -66,7 +64,9 @@ class AdminService:
         cnj = CnjNumber.parse(cnj_value)
         segment = (cnj.digits[13], cnj.tribunal_code)
         if segment not in SUPPORTED_TRIBUNALS:
-            raise AdminValidationError("Aceitos: TJRJ (8.19) e TRF2 (4.02)")
+            raise AdminValidationError(
+                "Aceitos: TJRJ (8.19), TRF2 (4.02), TRF4 (4.04), TRT1 (5.01)"
+            )
         lawyer_code = lawyer_reference.strip().lower()
         if not REFERENCE_CODE.fullmatch(lawyer_code):
             raise AdminValidationError("Código do responsável inválido")

@@ -15,6 +15,7 @@ class MonitoredProcess:
     cnj: CnjNumber
     tribunal: str
     source_key: str | None
+    sensitivity: str = "CONFIDENTIAL"
 
 
 class PostgresMonitorRepository:
@@ -31,7 +32,7 @@ class PostgresMonitorRepository:
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT p.id, p.numero_cnj, p.tribunal, h.source_key
+                SELECT p.id, p.numero_cnj, p.tribunal, h.source_key, p.sensitivity
                   FROM legal_process p
                   LEFT JOIN process_system_history h
                     ON h.process_id = p.id AND h.ended_at IS NULL
@@ -41,10 +42,21 @@ class PostgresMonitorRepository:
             ).fetchall()
         return tuple(
             MonitoredProcess(
-                row["id"], CnjNumber(row["numero_cnj"]), row["tribunal"], row["source_key"]
+                row["id"],
+                CnjNumber(row["numero_cnj"]),
+                row["tribunal"],
+                row["source_key"],
+                row["sensitivity"],
             )
             for row in rows
         )
+
+    def statuses(self) -> dict[uuid.UUID, tuple[str, datetime | None]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT process_id, status, last_success_at FROM monitor_state"
+            ).fetchall()
+        return {row["process_id"]: (row["status"], row["last_success_at"]) for row in rows}
 
     def known_fingerprints(self, process_id: uuid.UUID, source: str) -> set[str]:
         with self._connect() as connection:

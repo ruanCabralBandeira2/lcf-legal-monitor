@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from legal_monitor import __version__
+from legal_monitor.admin.portfolio import parse_portfolio
 from legal_monitor.admin.repository import AdminRepositoryError, PostgresAdminRepository
 from legal_monitor.admin.service import AdminService, AdminValidationError
 from legal_monitor.browser.session import BrowserSessionManager, BrowserUnavailableError
@@ -25,6 +26,7 @@ from legal_monitor.connectors.routing import (
     CATALOG,
     SourceEndpoint,
     UnknownSourceError,
+    candidate_keys,
     candidate_sources,
     get_endpoint,
 )
@@ -460,7 +462,85 @@ def session_watch(source: str, every_minutes: int, max_hours: float, notify: boo
     return 0
 
 
-def monitor_run() -> int:
+def import_processes(path: str, lawyer: str, actor: str, dry_run: bool) -> int:
+    """Importa a carteira (um número por linha) e separa por site provável."""
+    portfolio = parse_portfolio(Path(path).read_text(encoding="utf-8"))
+    created = existing = rejected = 0
+    service = None if dry_run else _admin_service()
+    for entry in portfolio.entries:
+        if service is None or entry.tribunal is None:
+            continue
+        try:
+            record = service.register_process(
+                cnj_value=str(entry.cnj),
+                lawyer_reference=lawyer,
+                sensitivity=entry.sensitivity,
+                actor_id=actor,
+            )
+        except (AdminValidationError, AdminRepositoryError):
+            rejected += 1
+            continue
+        if record.created:
+            created += 1
+        else:
+            existing += 1
+        if entry.site_override:
+            forced = CATALOG[entry.site_override]
+            PostgresMonitorRepository(Settings.from_env().database_url).record_source(
+                record.id,
+                system=forced.system.value,
+                source_key=forced.key,
+                at=datetime.now(UTC),
+            )
+    _emit(
+        {
+            "ok": True,
+            "dry_run": dry_run,
+            "valid": len(portfolio.entries),
+            "created": created,
+            "already_registered": existing,
+            "rejected": rejected,
+            "invalid_check_digits": portfolio.invalid,
+            "not_cnj": portfolio.not_cnj,
+            "duplicates": portfolio.duplicates,
+            "by_likely_site": {
+                site: {
+                    "count": len(entries),
+                    "restricted": sum(e.sensitivity is Sensitivity.RESTRICTED for e in entries),
+                }
+                for site, entries in portfolio.by_site().items()
+            },
+        }
+    )
+    return 0
+
+
+def sites_report() -> int:
+    """Carteira cadastrada por site: onde já foi encontrado ou onde será procurado."""
+    settings = Settings.from_env()
+    repository = PostgresMonitorRepository(settings.database_url)
+    statuses = repository.statuses()
+    report: dict[str, dict[str, Any]] = {}
+    for process in repository.active_processes():
+        site = process.source_key or f"a-descobrir:{candidate_keys(process.cnj)[0]}"
+        bucket = report.setdefault(site, {"count": 0, "status": {}, "last_success": None})
+        bucket["count"] += 1
+        status, last_success = statuses.get(process.id, ("SEM_ESTADO", None))
+        bucket["status"][status] = bucket["status"].get(status, 0) + 1
+        if last_success and (
+            bucket["last_success"] is None or last_success > bucket["last_success"]
+        ):
+            bucket["last_success"] = last_success
+    for bucket in report.values():
+        if bucket["last_success"] is not None:
+            bucket["last_success"] = bucket["last_success"].isoformat()
+    _emit({"ok": True, "sites": dict(sorted(report.items(), key=lambda item: -item[1]["count"]))})
+    return 0
+
+
+def monitor_run(
+    site: str | None = None, notify_initial: bool = False, interactive_login: bool = True
+) -> int:
     """Rodada completa: login por fonte, leitura, dedupe, download e e-mail (ADR-009)."""
     settings = Settings.from_env()
     alerts = _auth_alert_service(settings)
@@ -488,9 +568,11 @@ def monitor_run() -> int:
         on_waiting_approval=on_waiting,
         diagnostics_dir=settings.temp_dir / "diagnostico",
         max_attachment_bytes=settings.email_max_attachment_bytes,
+        notify_initial=notify_initial,
+        interactive_login=interactive_login,
     )
-    summary = service.run()
-    _emit({"ok": True, **summary.as_dict()})
+    summary = service.run(site=site)
+    _emit({"ok": True, "site": site or "todos", **summary.as_dict()})
     return 0
 
 
@@ -742,9 +824,30 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser.add_argument("--every", type=int, default=5, help="minutos entre verificações")
     watch_parser.add_argument("--max-hours", type=float, default=12.0)
     watch_parser.add_argument("--notify", action="store_true")
-    subcommands.add_parser(
+    monitor_parser = subcommands.add_parser(
         "monitor-run", help="rodada completa: login, leitura, novidades, download e e-mail"
     )
+    monitor_parser.add_argument(
+        "--site", choices=sorted(CATALOG), help="roda só o robô deste site (agenda própria)"
+    )
+    monitor_parser.add_argument(
+        "--notify-initial",
+        action="store_true",
+        help="1ª rodada: um e-mail por processo (padrão: um resumo único)",
+    )
+    monitor_parser.add_argument(
+        "--no-interactive-login",
+        action="store_true",
+        help="não abre janela de login: sessão caída só gera aviso (robôs de hora em hora)",
+    )
+    import_parser = subcommands.add_parser(
+        "import-processes", help="importa a carteira (um número por linha) e separa por site"
+    )
+    import_parser.add_argument("path")
+    import_parser.add_argument("--lawyer", required=True)
+    import_parser.add_argument("--actor", default="local-admin")
+    import_parser.add_argument("--dry-run", action="store_true")
+    subcommands.add_parser("sites-report", help="carteira cadastrada por site e estado")
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -797,7 +900,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "session-watch":
             return session_watch(args.source, args.every, args.max_hours, args.notify)
         if args.command == "monitor-run":
-            return monitor_run()
+            return monitor_run(args.site, args.notify_initial, not args.no_interactive_login)
+        if args.command == "import-processes":
+            return import_processes(args.path, args.lawyer, args.actor, args.dry_run)
+        if args.command == "sites-report":
+            return sites_report()
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

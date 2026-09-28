@@ -101,6 +101,7 @@ class MonitorServiceTests(unittest.TestCase):
             on_waiting_approval=lambda endpoint: None,
             diagnostics_dir=root / "diag",
             max_attachment_bytes=20_000_000,
+            notify_initial=True,
         )
         self.process = MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None)
         self.endpoint = CATALOG["pje-tjrj-1g"]
@@ -123,6 +124,21 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertIn("Acompanhamento iniciado", self.notifier.sent[0].title)
         self.assertEqual(self.repo.checked, ["ACTIVE_HEALTHY"])
 
+    def test_default_first_run_is_silent_and_summarized_once(self) -> None:
+        self.service._notify_initial = False
+        self.service._baseline = []
+        for text in ("Decisão A", "Despacho B"):
+            self.process = MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None)
+            self.repo.movements.clear()
+            _, connector = self._run(timeline(text))
+            self.assertEqual(connector.downloads, [])
+        self.assertEqual(self.notifier.sent, [])
+        self.assertEqual(self.service._send_baseline_summary(), 1)
+        summary = self.notifier.sent[0]
+        self.assertIn("Acompanhamento iniciado (2 processos)", summary.title)
+        self.assertIn("Decisão A", summary.body)
+        self.assertEqual(summary.attachments, ())
+
     def test_second_run_without_changes_sends_nothing(self) -> None:
         items = timeline("Decisão C", "Despacho B")
         self._run(items)
@@ -139,6 +155,19 @@ class MonitorServiceTests(unittest.TestCase):
         self.assertEqual(connector.downloads, ["0-0"])
         self.assertIn("Movimentação", self.notifier.sent[-1].title)
         self.assertEqual(len(self.notifier.sent[-1].attachments), 1)
+
+    def test_restricted_process_email_has_no_text_or_attachment(self) -> None:
+        self.process = MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None, "RESTRICTED")
+        self._run(timeline("Decisão sigilosa X"))
+        message = self.notifier.sent[0]
+        self.assertEqual(message.attachments, ())
+        self.assertNotIn("sigilosa", message.body)
+        self.assertIn("processo restrito", message.body)
+
+    def test_intimation_documents_are_never_downloaded(self) -> None:
+        _, connector = self._run(timeline("Intimação Eletrônica - Expedida"))
+        self.assertEqual(connector.downloads, [])
+        self.assertEqual(len(self.notifier.sent), 1)  # o aviso sai mesmo assim
 
     def test_fingerprint_is_stable_across_runs(self) -> None:
         item = timeline("Decisão C")[0]

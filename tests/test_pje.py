@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from legal_monitor.connectors.pje import (
+    BRASILIA,
     FORBIDDEN_CONTROL,
     PjeConnector,
     items_from_payload,
@@ -22,7 +23,11 @@ class PjeParsingTests(unittest.TestCase):
     def test_parse_pje_dates(self) -> None:
         self.assertEqual(parse_pje_date("28 set. 2026"), datetime(2026, 9, 28, tzinfo=UTC))
         self.assertEqual(parse_pje_date("05 MAR 2025"), datetime(2025, 3, 5, tzinfo=UTC))
-        self.assertEqual(parse_pje_date("01/02/2026 10:00"), datetime(2026, 2, 1, tzinfo=UTC))
+        self.assertEqual(parse_pje_date("01/02/2026"), datetime(2026, 2, 1, tzinfo=UTC))
+        self.assertEqual(
+            parse_pje_date("01/02/2026 10:05:07"),
+            datetime(2026, 2, 1, 10, 5, 7, tzinfo=BRASILIA),
+        )
         self.assertIsNone(parse_pje_date("sem data"))
 
     def test_items_from_payload_extracts_document_ids(self) -> None:

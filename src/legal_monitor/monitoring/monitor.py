@@ -13,32 +13,50 @@ from pathlib import Path
 from typing import Any
 
 from legal_monitor.browser.session import BrowserSessionManager
+from legal_monitor.connectors.eproc import EprocConnector
 from legal_monitor.connectors.errors import AuthenticationRequired, ConnectorError
 from legal_monitor.connectors.pje import PjeConnector, TimelineItem
-from legal_monitor.connectors.routing import CATALOG, SourceEndpoint, candidate_sources
+from legal_monitor.connectors.routing import (
+    CATALOG,
+    SourceEndpoint,
+    candidate_keys,
+    candidate_sources,
+)
 from legal_monitor.documents.service import DocumentService, DocumentValidationError
 from legal_monitor.domain.enums import ErrorCode, SessionState, SourceSystem
 from legal_monitor.domain.models import DocumentRecord, Movement, ProcessRef
 from legal_monitor.monitoring.latest import build_movement_message
 from legal_monitor.monitoring.monitor_repository import MonitoredProcess, PostgresMonitorRepository
-from legal_monitor.notifications.base import Notifier
+from legal_monitor.notifications.base import NotificationMessage, Notifier
 
 LOGGER = logging.getLogger(__name__)
 MAX_DOCUMENTS_PER_MOVEMENT = 5
+BASELINE_LINES_PER_EMAIL = 40
 
 
-def movement_from_item(item: TimelineItem, *, observed_at: datetime) -> Movement:
+def movement_from_item(
+    item: TimelineItem, *, observed_at: datetime, system: SourceSystem = SourceSystem.PJE
+) -> Movement:
     first_doc = next((doc.document_id for doc in item.documents if doc.document_id), None)
     return Movement(
-        source=SourceSystem.PJE,
-        source_event_id=None,
+        source=system,
+        source_event_id=item.event_id,
         event_at=item.event_date,
         observed_at=observed_at,
         type_raw=item.text[:500],
-        type_normalized="pje-timeline",
+        type_normalized=f"{system.value.lower()}-timeline",
         description=item.text,
         document_ref=first_doc,
     )
+
+
+def connector_for(endpoint: SourceEndpoint) -> PjeConnector | EprocConnector | None:
+    """Um "robô" por família de sistema; cada site do catálogo usa o seu."""
+    if endpoint.system is SourceSystem.PJE:
+        return PjeConnector(endpoint)
+    if endpoint.system is SourceSystem.EPROC:
+        return EprocConnector(endpoint)
+    return None
 
 
 @dataclass
@@ -61,6 +79,7 @@ class RunSummary:
     started_at: datetime
     processes: list[ProcessOutcome] = field(default_factory=list)
     sessions: dict[str, str] = field(default_factory=dict)
+    baseline_emails: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -68,7 +87,7 @@ class RunSummary:
             "sessions": self.sessions,
             "processes": [item.as_dict() for item in self.processes],
             "new_movements": sum(item.new_movements for item in self.processes),
-            "emails": sum(item.emails for item in self.processes),
+            "emails": sum(item.emails for item in self.processes) + self.baseline_emails,
         }
 
 
@@ -84,7 +103,10 @@ class MonitorService:
         on_waiting_approval: Callable[[SourceEndpoint], None],
         diagnostics_dir: Path,
         max_attachment_bytes: int,
+        notify_initial: bool = False,
+        interactive_login: bool = True,
     ) -> None:
+        self._interactive_login = interactive_login
         self._repo = repository
         self._sessions = sessions
         self._documents = documents
@@ -93,12 +115,18 @@ class MonitorService:
         self._on_waiting = on_waiting_approval
         self._diagnostics = diagnostics_dir
         self._max_attachment = max_attachment_bytes
+        # Primeira rodada de cada processo: por padrão registra o histórico em silêncio e
+        # envia um único resumo; com notify_initial, um e-mail por processo.
+        self._notify_initial = notify_initial
+        self._baseline: list[tuple[MonitoredProcess, TimelineItem]] = []
 
-    def run(self) -> RunSummary:
+    def run(self, *, site: str | None = None) -> RunSummary:
+        """Rodada completa; com `site`, só aquele site (um robô por site, agendas próprias)."""
         summary = RunSummary(started_at=datetime.now(UTC))
+        self._baseline = []
         pending = {p.id: p for p in self._repo.active_processes()}
         outcomes = {pid: ProcessOutcome(process=p.cnj.masked()) for pid, p in pending.items()}
-        summary.processes = list(outcomes.values())
+        touched: set[uuid.UUID] = set()
         # Ordem de fontes: as já conhecidas primeiro; depois descoberta pelo catálogo.
         order: list[str] = []
         for process in pending.values():
@@ -107,17 +135,29 @@ class MonitorService:
             for key in keys:
                 if key and key not in order:
                     order.append(key)
+        if site is not None:
+            order = [key for key in order if key == site]
         for key in order:
             endpoint = CATALOG[key]
             group = [
                 p
                 for p in pending.values()
                 if key == p.source_key
-                or (p.source_key is None and endpoint in candidate_sources(p.cnj))
+                or (
+                    p.source_key is None
+                    # Robô de um site só descobre os processos cujo site provável é ele,
+                    # para não gastar sessões curtas (PJe) procurando o que está no eproc.
+                    and (
+                        candidate_keys(p.cnj)[0] == key
+                        if site is not None
+                        else endpoint in candidate_sources(p.cnj)
+                    )
+                )
             ]
             if not group:
                 continue
-            if endpoint.system is not SourceSystem.PJE:
+            touched.update(p.id for p in group)
+            if connector_for(endpoint) is None:
                 for p in group:
                     outcomes[p.id].detail = f"{key}: conector ainda não implementado"
                 continue
@@ -135,11 +175,44 @@ class MonitorService:
             found = self._run_group(endpoint, group, outcomes)
             for pid in found:
                 pending.pop(pid, None)
+        summary.processes = [outcomes[pid] for pid in outcomes if pid in touched]
+        summary.baseline_emails = self._send_baseline_summary()
         return summary
+
+    def _send_baseline_summary(self) -> int:
+        """Um e-mail (em partes, se grande) com os processos cujo acompanhamento começou."""
+        if self._notifier is None or not self._baseline:
+            return 0
+        lines = []
+        for process, item in self._baseline:
+            text = "(restrito)" if process.sensitivity == "RESTRICTED" else item.text[:90]
+            lines.append(f"- {process.cnj} | {item.date_text or 's/ data'} | {text}")
+        sent = 0
+        for start in range(0, len(lines), BASELINE_LINES_PER_EMAIL):
+            chunk = lines[start : start + BASELINE_LINES_PER_EMAIL]
+            part = start // BASELINE_LINES_PER_EMAIL + 1
+            self._notifier.send(
+                NotificationMessage(
+                    title=f"[LCF Monitor] Acompanhamento iniciado ({len(lines)} processos) - "
+                    f"parte {part}",
+                    body=(
+                        "Histórico registrado; daqui em diante você recebe só as novidades.\n"
+                        "Processo | última movimentação | resumo\n\n"
+                        + "\n".join(chunk)
+                        + "\n\nPrazo não calculado. Confira sempre no sistema do tribunal."
+                    ),
+                    correlation_id=f"baseline-{datetime.now(UTC):%Y%m%dT%H%M%S}-{part}",
+                    demo_only=False,
+                    max_length=20_000,
+                )
+            )
+            sent += 1
+        return sent
 
     def _ensure_session(self, endpoint: SourceEndpoint) -> SessionState:
         state = self._sessions.check(endpoint).state
-        if state is SessionState.VALID:
+        if state is SessionState.VALID or not self._interactive_login:
+            # Sem login interativo (robôs de hora em hora): só avisa; a pessoa roda auth-open.
             return state
         LOGGER.info("Sessão %s inválida (%s); iniciando login por certificado", endpoint.key, state)
         return self._sessions.login(
@@ -154,7 +227,8 @@ class MonitorService:
         group: list[MonitoredProcess],
         outcomes: dict[uuid.UUID, ProcessOutcome],
     ) -> set[uuid.UUID]:
-        connector = PjeConnector(endpoint)
+        connector = connector_for(endpoint)
+        assert connector is not None  # garantido por run()
         found: set[uuid.UUID] = set()
         with self._sessions.context(
             endpoint, headless=self._sessions.headless_for(endpoint)
@@ -196,7 +270,7 @@ class MonitorService:
     def _process_autos(
         self,
         context: Any,
-        connector: PjeConnector,
+        connector: PjeConnector | EprocConnector,
         autos: Any,
         endpoint: SourceEndpoint,
         process: MonitoredProcess,
@@ -208,12 +282,21 @@ class MonitorService:
             process.id, system=endpoint.system.value, source_key=endpoint.key, at=now
         )
         outcome.source = endpoint.key
-        known = self._repo.known_fingerprints(process.id, SourceSystem.PJE.value)
+        system = endpoint.system
+        known = self._repo.known_fingerprints(process.id, system.value)
         outcome.first_run = not known
-        pairs = [(item, movement_from_item(item, observed_at=now)) for item in items]
+        pairs = [(item, movement_from_item(item, observed_at=now, system=system)) for item in items]
         new = [(item, mv) for item, mv in pairs if mv.fingerprint not in known]
-        # Primeira rodada: registra o histórico inteiro, mas só avisa da movimentação mais recente.
-        to_notify = {id(pairs[0][0])} if outcome.first_run else {id(item) for item, _ in new}
+        # Primeira rodada: registra o histórico inteiro; avisa só da mais recente (um e-mail
+        # por processo com notify_initial) ou entra no resumo único da rodada.
+        if outcome.first_run and not self._notify_initial:
+            to_notify: set[int] = set()
+            self._baseline.append((process, pairs[0][0]))
+            outcome.detail = "histórico registrado (resumo único por e-mail)"
+        elif outcome.first_run:
+            to_notify = {id(pairs[0][0])}
+        else:
+            to_notify = {id(item) for item, _ in new}
         for item, movement in reversed(new):  # do mais antigo para o mais recente
             movement_id = self._repo.insert_movement(process.id, movement, uuid.uuid4())
             if movement_id is None:
@@ -227,14 +310,18 @@ class MonitorService:
             outcome.documents += len(records)
             if self._notifier is not None:
                 first = records[0][1] if records else None
+                restricted = process.sensitivity == "RESTRICTED"
                 message = build_movement_message(
                     process.cnj,
                     endpoint,
                     item,
                     first,
-                    attached=first is not None and first.bytes <= self._max_attachment,
+                    attached=(
+                        not restricted and first is not None and first.bytes <= self._max_attachment
+                    ),
                     initial=outcome.first_run,
                     extra_documents=max(len(records) - 1, 0),
+                    restricted=restricted,
                 )
                 self._notifier.send(message)
                 outcome.emails += 1
@@ -244,13 +331,16 @@ class MonitorService:
     def _download_all(
         self,
         context: Any,
-        connector: PjeConnector,
+        connector: PjeConnector | EprocConnector,
         autos: Any,
         endpoint: SourceEndpoint,
         process: MonitoredProcess,
         item: TimelineItem,
     ) -> list[tuple[str, DocumentRecord]]:
         records: list[tuple[str, DocumentRecord]] = []
+        if not item.documents_allowed:
+            LOGGER.info("Documentos de intimação/citação não são abertos (risco de ciência)")
+            return records
         for document in item.documents[:MAX_DOCUMENTS_PER_MOVEMENT]:
             with tempfile.TemporaryDirectory(prefix="lcf-monitor-") as temporary:
                 try:

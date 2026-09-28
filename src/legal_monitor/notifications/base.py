@@ -29,12 +29,14 @@ class NotificationMessage:
     correlation_id: str
     demo_only: bool
     attachments: tuple[NotificationAttachment, ...] = ()
+    # 2.000 é o limite do Discord; e-mails de resumo podem usar um limite maior.
+    max_length: int = 2_000
 
     def __post_init__(self) -> None:
         if not self.title.strip() or not self.body.strip() or not self.correlation_id.strip():
             raise ValueError("Título, corpo e correlação da notificação são obrigatórios")
-        if len(self.render_text()) > 2_000:
-            raise ValueError("Notificação excede o limite de 2.000 caracteres")
+        if len(self.render_text()) > self.max_length:
+            raise ValueError(f"Notificação excede o limite de {self.max_length} caracteres")
 
     def render_text(self) -> str:
         return f"**{self.title.strip()}**\n{self.body.strip()}"

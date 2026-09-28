@@ -14,7 +14,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin
@@ -35,7 +35,15 @@ FORBIDDEN_PATTERN = (
     r"visibilidade|cancelar|desentranh"
 )
 FORBIDDEN_CONTROL = re.compile(FORBIDDEN_PATTERN, re.IGNORECASE)
-DOCUMENT_ID = re.compile(r"idProcessoDoc(?:umento)?[=:'\"\s]+(\d+)|idDocumento[=:'\"\s]+(\d+)")
+DOCUMENT_ID = re.compile(
+    r"idProcessoDoc(?:umento)?[=:'\"\s]+(\d+)|idDocumento[=:'\"\s]+(\d+)|[?&]doc=(\d+)"
+)
+# Eventos de comunicação processual: o conteúdo nunca é aberto pelo robô (risco de ciência).
+COMMUNICATION_EVENT = re.compile(
+    r"intima[cç][aã]o|cita[cç][aã]o|intimad[oa]|citad[oa]|expedi[cç][aã]o de (?:intima|cita)",
+    re.IGNORECASE,
+)
+BRASILIA = timezone(timedelta(hours=-3))
 _MONTHS = {
     "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
     "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
@@ -122,10 +130,18 @@ class TimelineItem:
     date_text: str | None
     text: str
     documents: tuple[TimelineDocument, ...] = field(default=())
+    # Número do evento na fonte (eproc numera cada movimentação); estável entre rodadas.
+    event_id: str | None = None
 
     @property
     def event_date(self) -> datetime | None:
         return parse_pje_date(self.date_text)
+
+    @property
+    def documents_allowed(self) -> bool:
+        """Documentos de intimação/citação nunca são abertos: abrir o teor pode contar como
+        ciência e iniciar prazo. O aviso da movimentação é enviado mesmo assim."""
+        return not COMMUNICATION_EVENT.search(self.text)
 
 
 def _strip_accents(value: str) -> str:
@@ -141,9 +157,20 @@ def parse_pje_date(value: str | None) -> datetime | None:
         return datetime(
             int(match.group(3)), _MONTHS[match.group(2)], int(match.group(1)), tzinfo=UTC
         )
-    match = re.match(r"(\d{2})/(\d{2})/(\d{4})", text)
+    match = re.match(r"(\d{2})/(\d{2})/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?", text)
     if match:
-        return datetime(int(match.group(3)), int(match.group(2)), int(match.group(1)), tzinfo=UTC)
+        day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+        if match.group(4) is None:
+            return datetime(year, month, day, tzinfo=UTC)
+        return datetime(
+            year,
+            month,
+            day,
+            int(match.group(4)),
+            int(match.group(5)),
+            int(match.group(6) or 0),
+            tzinfo=BRASILIA,
+        )
     return None
 
 
@@ -153,9 +180,11 @@ def items_from_payload(payload: dict[str, Any]) -> tuple[TimelineItem, ...]:
         docs = []
         for doc in raw.get("docs", []):
             found = DOCUMENT_ID.search(doc.get("hint", ""))
-            doc_id = (found.group(1) or found.group(2)) if found else None
+            doc_id = next((group for group in found.groups() if group), None) if found else None
             docs.append(TimelineDocument(doc["tag"], doc.get("label", ""), doc_id))
-        items.append(TimelineItem(raw.get("date"), raw.get("text", ""), tuple(docs)))
+        items.append(
+            TimelineItem(raw.get("date"), raw.get("text", ""), tuple(docs), raw.get("event"))
+        )
     return tuple(items)
 
 

@@ -31,3 +31,7 @@
 | M3 - API/painel em rede | CLI administrativa é a interface mínima atual | adiado até definir autenticação e exposição local |
 | API Pública DataJud | `docs/research/DATAJUD_API.md`, `ADR-005` | estudo concluído: metadados/movimentos, sem peças; não consumida e aguarda aceite expresso |
 | Medição de duração da sessão | `session-watch`, CSV em `storage/tmp` | eproc ~10 h; PJe ~11-16 min após login com certificado, atividade não renova (28/09/2026) |
+| Carteira real e separação por site | `legal_monitor.admin.portfolio`, `import-processes`, `sites-report`, `storage/carteira/` (fora do Git) | 118 processos importados em 28/09/2026 |
+| Robôs por site e agendas | `monitor-run --site`, `--no-interactive-login`, `ops/windows/registrar-robos.ps1`, ADR-009, `docs/runbooks/ROBOS_POR_SITE.md` | implementado; agendamento a registrar pelo operador após validar cada site |
+| Conector eproc (TJRJ, JFRJ, TRF2, TRF4) | `legal_monitor.connectors.eproc`, `tests/test_eproc.py` | extração validada em página sintética no Edge; 1º uso real pendente |
+| Processos restritos e eventos de intimação | `MonitoredProcess.sensitivity`, `TimelineItem.documents_allowed` | e-mail só aviso para RESTRICTED; documentos de intimação/citação nunca abertos |

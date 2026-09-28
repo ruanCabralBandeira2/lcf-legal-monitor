@@ -58,8 +58,14 @@ def build_movement_message(
     attached: bool,
     initial: bool = False,
     extra_documents: int = 0,
+    restricted: bool = False,
 ) -> NotificationMessage:
     text = item.text if len(item.text) <= MAX_MOVEMENT_TEXT else item.text[:MAX_MOVEMENT_TEXT] + "…"
+    if restricted:
+        # Processo restrito (família, criminal, segredo): o e-mail só avisa; conteúdo e peça
+        # ficam no computador do escritório.
+        text = "(processo restrito: consulte o texto no sistema ou no computador do escritório)"
+        attached = False
     lines = (
         [
             "Acompanhamento iniciado. Esta é a movimentação mais recente; a partir de agora você "
@@ -78,9 +84,7 @@ def build_movement_message(
         lines += [
             f"Documento: {record.friendly_name} ({record.page_count} pág.)",
             f"SHA-256: {record.sha256}",
-            "Anexo: sim"
-            if attached
-            else f"Anexo: grande demais; guardado em {record.storage_path}",
+            "Anexo: sim" if attached else f"Anexo: não enviado; guardado em {record.storage_path}",
         ]
     else:
         lines.append("Documento: nenhum PDF obtido para esta movimentação")

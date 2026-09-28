@@ -19,7 +19,7 @@ Em caso de divergência, preservar segurança e rastreabilidade, registrar a dec
 
 - **28/09/2026: autorização da LCF recebida** (conta de advogado, token USB, 2FA aprovado pelo responsável técnico no celular). Direção do produto no ADR-007. Versão 0.7.0 entrega roteamento CNJ -> fonte, sessão por token com aviso de 2FA e canal e-mail.
 - Repositório: `ruanCabralBandeira2/lcf-legal-monitor` (tornado público em 28/09/2026 para leitura; avaliar voltar a privado).
-- Desenvolvimento também no Windows (`C:\Users\ruanf\Documents\lcf-legal-monitor`, Python 3.12.10 em `.venv`, Git 2.55); sem Docker/PostgreSQL no Windows, então testes PostgreSQL são pulados lá e rodam no CI e no Mac.
+- **Decisão de 28/09/2026: construir e validar tudo no Windows primeiro; migrar a operação para o Mac mini quando tudo funcionar.** Ambiente Windows em `docs/runbooks/AMBIENTE_WINDOWS.md` (Docker Desktop/WSL2 com PostgreSQL 17.11, Python 3.12.10, Edge como navegador do robô). A coluna "Mac mini (futuro)" desse runbook indica o que muda na migração.
 - Branch estável: `main`; desenvolvimento ocorre em branches `codex/*` com CI antes da integração.
 - Hospedagem: Mac Apple Silicon, aplicação local e PostgreSQL 17.11 no Docker.
 - Runtime: Python 3.12.13 em `.venv`; dependências fixadas em `requirements.lock`.
@@ -160,7 +160,7 @@ Instruções e limites: `docs/runbooks/SUMMARY_DEMO.md`.
 Agora (pós-autorização):
 
 1. Operador cria senha de app Gmail, roda `legal-monitor secret-set smtp` e `legal-monitor email-test`.
-2. No Mac mini: token USB + Chrome + `pip install -e .[browser]` + `legal-monitor auth-open eproc-tjrj-1g`; validar se o seletor de certificado aparece sob Playwright (senão, plano CDP do ADR-007).
+2. No Windows (Edge): token USB + `legal-monitor auth-open eproc-tjrj-1g`; validar se o seletor de certificado aparece sob Playwright (senão, plano CDP do ADR-007). Repetir no Mac com Chrome na migração.
 3. Com sessão válida, capturar HTML de um processo autorizado (lista de eventos e documentos), sanitizar e escrever o parser eproc compartilhado TJRJ/TRF2 (M4c).
 4. Job `MONITOR_PROCESS`: sessão -> movimentos -> novos -> download -> `DocumentService` -> e-mail ao advogado (M5/M6).
 5. launchd no Mac mini rodando `auth-check --notify` e o worker; pasta `storage/documents` compartilhada por SMB.
@@ -181,7 +181,7 @@ A mensagem pronta para o grupo e a ficha de registro estão em `docs/templates/M
 
 ## Última validação conhecida
 
-- 28/09/2026, Windows, versão 0.7.0: 78 testes aprovados, 6 ignorados (PostgreSQL ausente e symlink no Windows); Ruff e formatação aprovados; `sources-for` e `doctor` conferidos. Migração 004 ainda não aplicada em PostgreSQL real (CI/Mac).
+- 28/09/2026, Windows, versão 0.7.0: migrações 001-004 aplicadas no PostgreSQL 17.11 (Docker/WSL2); 85 testes aprovados incluindo PostgreSQL, 1 ignorado (symlink no Windows); Ruff e formatação aprovados. Playwright + Edge 154 abriu o eproc TJRJ e `auth-check` retornou `AUTH_REQUIRED` corretamente (ainda sem login).
 
 - Migrações `001`, `002` e `003` aplicadas no PostgreSQL 17.11.
 - Versão 0.6.0: contrato de resumo factual e comando `summary-demo` adicionados sem liberar o M0.

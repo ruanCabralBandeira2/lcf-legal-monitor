@@ -11,7 +11,8 @@
 | Connector SDK/fake | `legal_monitor.connectors` | implementado antecipadamente |
 | Documento/integração | `legal_monitor.documents` | fatia segura implementada |
 | Router CNJ -> fontes (eproc TJRJ, eproc TRF2, PDPJ) | `legal_monitor.connectors.routing`, `sources-for`, ADR-007 | implementado e testado |
-| Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004 | implementado; validação com token real pendente no Mac mini |
+| Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004, `tests/test_manual_action_postgres.py` | implementado; migração 004 validada no PostgreSQL; login com token real pendente (Windows/Edge) |
+| Ambiente Windows-first e plano de migração ao Mac | `docs/runbooks/AMBIENTE_WINDOWS.md` | validado em 28/09/2026 |
 | Parser/download eproc | ADR-007 | não iniciado; depende de HTML real sanitizado |
 | Canal e-mail | `legal_monitor.notifications.email`, `secret-set`, `email-test`, `docs/runbooks/EMAIL.md` | implementado; envio real pendente da senha de app |
 | DJEN produção | host guard implementado; cliente real no M6 | parcial |

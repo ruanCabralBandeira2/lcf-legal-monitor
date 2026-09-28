@@ -6,6 +6,7 @@ import getpass
 import importlib.util
 import json
 import platform
+import re
 import sys
 import tempfile
 import time
@@ -13,6 +14,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from legal_monitor import __version__
 from legal_monitor.admin.portfolio import parse_portfolio
@@ -20,6 +22,7 @@ from legal_monitor.admin.repository import AdminRepositoryError, PostgresAdminRe
 from legal_monitor.admin.service import AdminService, AdminValidationError
 from legal_monitor.browser.session import BrowserSessionManager, BrowserUnavailableError
 from legal_monitor.config import ConfigError, Settings
+from legal_monitor.connectors.eproc import EprocConnector
 from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.fake import FakeConnector
 from legal_monitor.connectors.routing import (
@@ -596,6 +599,125 @@ def structure_diagnostic(number: str, site: str) -> int:
     return 0
 
 
+TJRJ_PUBLIC_SEARCH_URL = "https://www.tjrj.jus.br/processos"
+_CAPTCHA_ANY = (
+    "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], "
+    ".g-recaptcha, .h-captcha, [class*='captcha' i], [id*='captcha' i], img[src*='captcha' i]"
+)
+
+
+def _masked(value: str | None, limit: int = 120) -> str:
+    return re.sub(r"\d{3,}", "N", " ".join((value or "").split()))[:limit]
+
+
+def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
+    """Testa as duas vias do TJRJ legado para UM processo e devolve só estrutura (ADR-008):
+    A) consulta pública sem login; B) Portal de Serviços após login humano com certificado."""
+    from playwright.sync_api import sync_playwright
+
+    settings = Settings.from_env()
+    cnj = CnjNumber.parse(number)
+    formatted = str(cnj)  # NNNNNNN-DD.AAAA.J.TR.OOOO
+    out_dir = settings.temp_dir / "diagnostico"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
+    report: dict[str, Any] = {"process": cnj.masked()}
+    channel = {"channel": settings.browser_channel} if settings.browser_channel else {}
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(headless=True, **channel)
+        try:
+            context = browser.new_context(locale="pt-BR")
+            page = context.new_page()
+            page.goto(TJRJ_PUBLIC_SEARCH_URL, wait_until="domcontentloaded")
+            with contextlib.suppress(Exception):
+                page.wait_for_load_state("networkidle", timeout=20_000)
+            page.fill("#parte1ProcCNJ", formatted[:20])
+            page.fill("#parte2ProcCNJ", formatted[21:])
+            page.locator("button:has-text('Pesquisar')").first.click()
+            page.wait_for_timeout(8_000)
+            result_page = context.pages[-1]
+            with contextlib.suppress(Exception):
+                result_page.wait_for_load_state("networkidle", timeout=25_000)
+            result_page.wait_for_timeout(3_000)
+            path = out_dir / f"estrutura-tjrj-publica-{stamp}.json"
+            EprocConnector.dump_structure(result_page, path)
+            final = urlparse(result_page.url)
+            report["consulta_publica"] = {
+                "abas_abertas": len(context.pages),
+                "destino": f"{final.hostname}{final.path}#{_masked(final.fragment, 60)}",
+                "titulo": _masked(result_page.title(), 60),
+                "captcha_na_tela": result_page.locator(_CAPTCHA_ANY).count(),
+                "tabelas": result_page.locator("table").count(),
+                "linhas_de_tabela": result_page.locator("table tr").count(),
+                "elementos_movimento": result_page.locator(
+                    "[class*='moviment' i], [id*='moviment' i]"
+                ).count(),
+                "estrutura": str(path),
+            }
+        finally:
+            browser.close()
+        if not skip_portal:
+            endpoint = get_endpoint("tjrj-portal")
+            browser = playwright.chromium.launch(headless=False, **channel)
+            try:
+                context = browser.new_context(locale="pt-BR")
+                page = context.new_page()
+                page.goto(endpoint.base_url, wait_until="domcontentloaded")
+                page.wait_for_selector(endpoint.certificate_login_selector or "img", timeout=20_000)
+                page.locator(endpoint.certificate_login_selector or "img").first.click()
+                print(
+                    "Escolha o certificado e digite o PIN na janela do Portal (até 5 min)...",
+                    file=sys.stderr,
+                )
+                for _ in range(300):
+                    if "portalservicos" in page.url:
+                        break
+                    page.wait_for_timeout(1_000)
+                with contextlib.suppress(Exception):
+                    page.wait_for_load_state("networkidle", timeout=25_000)
+                page.wait_for_timeout(3_000)
+                landed = urlparse(page.url)
+                menu = []
+                for item in page.locator(
+                    "a:visible, [role=menuitem]:visible, button:visible"
+                ).all()[:120]:
+                    label = _masked(item.inner_text(), 60)
+                    route = item.get_attribute("href") or item.get_attribute("routerlink") or ""
+                    if label:
+                        menu.append([label, _masked(route, 70)])
+                fields = [
+                    [
+                        element.get_attribute("type") or "",
+                        element.get_attribute("id")
+                        or element.get_attribute("formcontrolname")
+                        or "",
+                        _masked(
+                            element.get_attribute("placeholder")
+                            or element.get_attribute("aria-label"),
+                            60,
+                        ),
+                    ]
+                    for element in page.locator("input:visible").all()[:20]
+                ]
+                path = out_dir / f"estrutura-tjrj-portal-{stamp}.json"
+                EprocConnector.dump_structure(page, path)
+                report["portal"] = {
+                    "logado": "portalservicos" in page.url,
+                    "destino": f"{landed.hostname}{landed.path}#{_masked(landed.fragment, 60)}",
+                    "titulo": _masked(page.title(), 60),
+                    "menu": menu[:80],
+                    "campos": fields,
+                    "estrutura": str(path),
+                }
+            finally:
+                if browser.is_connected():
+                    browser.close()
+    report_path = out_dir / f"diagnostico-tjrj-{stamp}.json"
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    _emit({"ok": True, "relatorio": str(report_path), **report})
+    return 0
+
+
 def monitor_run(
     site: str | None = None, notify_initial: bool = False, interactive_login: bool = True
 ) -> int:
@@ -929,6 +1051,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnostic_parser.add_argument("number")
     diagnostic_parser.add_argument("--site", required=True, choices=sorted(CATALOG))
+    tjrj_parser = subcommands.add_parser(
+        "diagnostico-tjrj",
+        help="testa consulta pública e Portal de Serviços do TJRJ para UM processo (só estrutura)",
+    )
+    tjrj_parser.add_argument("number")
+    tjrj_parser.add_argument("--sem-portal", action="store_true", help="só a consulta pública")
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -990,6 +1118,8 @@ def main(argv: list[str] | None = None) -> int:
             return admin_reset_history(args.number, args.actor)
         if args.command == "diagnostico-estrutura":
             return structure_diagnostic(args.number, args.site)
+        if args.command == "diagnostico-tjrj":
+            return tjrj_diagnostic(args.number, args.sem_portal)
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

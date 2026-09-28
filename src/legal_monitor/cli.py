@@ -360,8 +360,13 @@ def auth_open(source: str, click_certificate: bool) -> int:
 
     def on_waiting() -> None:
         print("Aguardando aprovação do 2FA no celular...", file=sys.stderr)
-        if notifier is not None:
+        if notifier is None:
+            return
+        # Falha no aviso nunca pode derrubar o login que a pessoa está fazendo.
+        try:
             notifier.send(build_approval_message(endpoint, f"approval-{endpoint.key}"))
+        except EmailNotificationError as exc:
+            print(f"Aviso por e-mail não enviado: {exc}", file=sys.stderr)
 
     result = _session_manager(settings, headless=False).login(
         endpoint,

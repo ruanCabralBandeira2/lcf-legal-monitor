@@ -43,6 +43,19 @@ PROCESS_ACTIONS = frozenset({"processo_selecionar"})
 # Paginação padrão das tabelas do eproc (framework "infra" do TRF4).
 NEXT_PAGE_SELECTOR = "a[id^='lnkInfraProximaPagina']"
 MAX_EVENT_PAGES = 60
+# Carregamento sob demanda da tabela de eventos (TRF2, 28/09/2026): rolar até o fim.
+MAX_LOAD_ROUNDS = 120
+LOAD_STABLE_ROUNDS = 3
+_SCROLL_TO_END_JS = r"""
+() => {
+  const table = document.querySelector('#tblEventos');
+  const last = table && table.querySelector('tr:last-child');
+  if (last) last.scrollIntoView({block: 'end'});
+  const box = document.querySelector('#divTblEventos');
+  if (box) box.scrollTop = box.scrollHeight;
+  window.scrollTo(0, document.body.scrollHeight);
+}
+"""
 # Mensagem do eproc para busca sem resultado (texto já sem acentos).
 NOT_FOUND_TEXT = re.compile(r"nao encontrad|nenhum (?:processo|registro)", re.IGNORECASE)
 _EMBEDDED_DOCUMENT = re.compile(
@@ -150,6 +163,7 @@ class EprocConnector:
         collected: dict[str, TimelineItem] = {}
         table_found = False
         for page_index in range(MAX_EVENT_PAGES):
+            self._load_all_events(autos)
             payload = autos.evaluate(_EVENTS_JS, [FORBIDDEN_PATTERN, page_index])
             table_found = table_found or bool(payload.get("found"))
             for item in items_from_payload(payload):
@@ -175,6 +189,26 @@ class EprocConnector:
         if all(item.event_id and item.event_id.isdigit() for item in items):
             items = tuple(sorted(items, key=lambda item: int(item.event_id or 0), reverse=True))
         return items
+
+    @staticmethod
+    def _load_all_events(autos: Page) -> None:
+        """O eproc (ex.: TRF2) desenha 50 eventos e carrega o resto sob demanda ao rolar
+        (`#carregarNovosEventos`). Rola até o fim até o número de linhas parar de crescer."""
+        previous, stable = -1, 0
+        for _ in range(MAX_LOAD_ROUNDS):
+            rows = autos.locator("#tblEventos tr").count()
+            if rows == previous:
+                stable += 1
+                if stable >= LOAD_STABLE_ROUNDS:
+                    return
+            else:
+                stable = 0
+            previous = rows
+            with contextlib.suppress(Exception):
+                autos.evaluate(_SCROLL_TO_END_JS)
+            with contextlib.suppress(Exception):
+                autos.wait_for_load_state("networkidle", timeout=8_000)
+            autos.wait_for_timeout(700)
 
     def download_document(
         self, context: BrowserContext, autos: Page, document: TimelineDocument, target: Path

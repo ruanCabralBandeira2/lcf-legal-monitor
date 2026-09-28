@@ -149,3 +149,51 @@ class EprocPaginationTests(unittest.TestCase):
         self.assertEqual([item.event_id for item in items], ["3", "2", "1"])
         self.assertEqual(items[0].documents[0].document_id, "333")
         self.assertIn("doc=333", items[0].documents[0].href or "")
+
+
+# Tabela que carrega eventos sob demanda ao rolar, como o eproc do TRF2 (dados fictícios):
+# começa com 1-3 e acrescenta até o evento 9 conforme a página é rolada até o fim.
+LAZY = (
+    '<html><body><div id="divTblEventos"><div id="carregarNovosEventos"><label></label></div>'
+    f'<table id="tblEventos">{_HEADER}'
+    + "".join(
+        f"<tr><td>{n}</td><td>0{n}/09/2026 10:00:00</td><td>Evento {n}</td><td>X</td><td></td></tr>"
+        for n in (1, 2, 3)
+    )
+    + '</table></div><div style="height:2500px"></div><script>'
+    "let next = 4;"
+    "window.addEventListener('scroll', () => {"
+    "  if (next > 9) return;"
+    "  if (window.innerHeight + window.scrollY < document.body.scrollHeight - 50) return;"
+    "  setTimeout(() => {"
+    "    const table = document.querySelector('#tblEventos');"
+    "    const body = table.querySelector('tbody') || table;"
+    "    for (let k = 0; k < 2 && next <= 9; k++, next++) {"
+    "      const tr = document.createElement('tr');"
+    "      tr.innerHTML = `<td>${next}</td><td>0${next}/09/2026 10:00:00</td>`"
+    "        + `<td>Evento ${next}</td><td>X</td><td></td>`;"
+    "      body.appendChild(tr);"
+    "    }"
+    "  }, 150);"
+    "});"
+    "</script></body></html>"
+)
+
+
+class EprocLazyLoadingTests(unittest.TestCase):
+    def test_scrolls_until_every_event_is_loaded(self) -> None:
+        try:
+            from playwright.sync_api import sync_playwright
+
+            playwright = sync_playwright().start()
+            browser = playwright.chromium.launch(channel="msedge", headless=True)
+        except Exception:
+            self.skipTest("Edge/Playwright indisponível (ex.: CI Linux)")
+        try:
+            page = browser.new_page(viewport={"width": 1000, "height": 600})
+            page.set_content(LAZY)
+            items = EprocConnector(CATALOG["eproc-trf2"]).read_timeline(page)
+        finally:
+            browser.close()
+            playwright.stop()
+        self.assertEqual([item.event_id for item in items], [str(n) for n in range(9, 0, -1)])

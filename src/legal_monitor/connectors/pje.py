@@ -44,6 +44,25 @@ COMMUNICATION_EVENT = re.compile(
     re.IGNORECASE,
 )
 BRASILIA = timezone(timedelta(hours=-3))
+TIMELINE_SELECTOR = "#divTimeLine, [id$='divTimeLine'], [id*='TimeLine'], .timeline"
+_NOTICE_SELECTOR = (
+    ".modal-dialog:visible .modal-title, .rich-mpnl-header:visible, "
+    ".rich-messages:visible, .alert:visible"
+)
+
+
+def _visible_notice(page: Any) -> str:
+    """Título curto de aviso visível na tela (sem números), para explicar uma falha."""
+    try:
+        notice = page.locator(_NOTICE_SELECTOR).first
+        if notice.count() == 0:
+            return ""
+        text = re.sub(r"\d{3,}", "N", " ".join(notice.inner_text(timeout=2_000).split()))
+    except Exception:
+        return ""
+    return f"; aviso na tela: {text[:80]}" if text else ""
+
+
 _MONTHS = {
     "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
     "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
@@ -236,11 +255,22 @@ class PjeConnector:
             raise ConnectorError(
                 ErrorCode.SOURCE_UNAVAILABLE, "Processo não encontrado nesta fonte"
             )
-        with context.expect_page(timeout=45_000) as popup:
-            link.click()
+        try:
+            with context.expect_page(timeout=90_000) as popup:
+                link.click()
+        except Exception as exc:
+            # Os autos não abriram (lentidão ou aviso na tela). Registra só o título do aviso
+            # visível, sem números, para o diagnóstico; a página fica aberta para o mapa.
+            raise ConnectorError(
+                ErrorCode.PARSE_ERROR, f"Autos não abriram em 90 s{_visible_notice(page)}"
+            ) from exc
         autos = popup.value
         with contextlib.suppress(Exception):
             autos.wait_for_load_state("networkidle", timeout=60_000)
+        # A janela dos autos abre em branco e só depois desenha a linha do tempo
+        # (1º uso, 28/09/2026: leitura antes da carga deu página vazia).
+        with contextlib.suppress(Exception):
+            autos.wait_for_selector(TIMELINE_SELECTOR, state="attached", timeout=60_000)
         page.close()
         return autos
 

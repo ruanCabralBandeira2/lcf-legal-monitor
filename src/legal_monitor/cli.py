@@ -25,6 +25,7 @@ from legal_monitor.config import ConfigError, Settings
 from legal_monitor.connectors.eproc import EprocConnector
 from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.fake import FakeConnector
+from legal_monitor.connectors.pje import _STRUCTURE_JS
 from legal_monitor.connectors.routing import (
     CATALOG,
     SourceEndpoint,
@@ -767,7 +768,10 @@ def _guided_recording(
         "Não clique em nada de petição. O robô só grava o caminho e a estrutura da tela.",
         file=sys.stderr,
     )
-    input("Quando estiver na tela do processo, volte aqui e pressione Enter... ")
+    input(
+        "Quando as movimentações do processo estiverem VISÍVEIS na tela, volte aqui e "
+        "pressione Enter... "
+    )
     tabs = [tab for tab in context.pages if not tab.is_closed()]
     final = next(
         (
@@ -779,11 +783,45 @@ def _guided_recording(
     )
     result: dict[str, Any] = {
         "trilha_da_navegacao": trail[before_trail:][:60],
-        "enderecos_internos": api_calls[before_calls:][:80],
+        # Todos os endereços internos da sessão (a pessoa pode navegar antes do aviso).
+        "enderecos_internos": api_calls[:120],
+        "enderecos_depois_do_aviso": len(api_calls) - before_calls,
         "abas": [_route(tab.url) for tab in tabs],
     }
     if final is None:
         return result
+    # Conteúdo dentro dos quadros embutidos (onde a consulta processual do Portal roda).
+    frames = []
+    for index, frame in enumerate(final.frames):
+        if frame == final.main_frame or not frame.url.startswith("http"):
+            continue
+        entry: dict[str, Any] = {"rota": _route(frame.url)}
+        try:
+            frame_path = out_dir / f"estrutura-tjrj-portal-quadro{index}-{stamp}.json"
+            frame_path.write_text(
+                json.dumps(frame.evaluate(_STRUCTURE_JS), ensure_ascii=False), encoding="utf-8"
+            )
+            entry.update(
+                {
+                    "tabelas": frame.locator("table").count(),
+                    "linhas": frame.locator("table tr, mat-row, [role=row]").count(),
+                    "paineis": frame.locator(
+                        "mat-expansion-panel, mat-card, .card, [role=tabpanel]"
+                    ).count(),
+                    "links_documento": frame.locator(
+                        "a[href*='document' i], a[href*='peca' i], a[href*='download' i], "
+                        "a[href*='visualiz' i], a[href*='.pdf' i], [class*='document' i]"
+                    ).count(),
+                    "rotulos": [_masked(label, 40) for label, _ in frame.evaluate(_UI_LABELS_JS)][
+                        :60
+                    ],
+                    "estrutura": str(frame_path),
+                }
+            )
+        except Exception as exc:
+            entry["erro"] = _masked(f"{type(exc).__name__}: {exc}", 150)
+        frames.append(entry)
+    result["quadros"] = frames
     path = out_dir / f"estrutura-tjrj-portal-processo-{stamp}.json"
     EprocConnector.dump_structure(final, path)
     result["tela_final"] = {
@@ -870,9 +908,14 @@ def tjrj_diagnostic(
                 trail: list[str] = []
 
                 def track(tab: Any) -> None:
+                    # A consulta do Portal roda num quadro embutido (iframe): grava os dois.
                     tab.on(
                         "framenavigated",
-                        lambda frame: frame == tab.main_frame and trail.append(_route(frame.url)),
+                        lambda frame: trail.append(
+                            _route(frame.url)
+                            if frame == tab.main_frame
+                            else f"[quadro] {_route(frame.url)}"
+                        ),
                     )
 
                 context.on("page", lambda tab: (trail.append("[nova aba]"), track(tab)))

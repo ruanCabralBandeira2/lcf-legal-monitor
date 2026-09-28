@@ -52,6 +52,7 @@ def movement_from_item(
 
 
 LOOKUP_RETRY = timedelta(hours=24)
+MAX_DISCOVERY_SHORT_SESSION = 8
 _CNJ_IN_TEXT = re.compile(r"\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}|\d{20}")
 
 
@@ -75,6 +76,16 @@ def next_candidate(
         if not recently_not_found(lookups.get((process.id, key)), now):
             return key
     return None
+
+
+def limit_discovery(group: list[MonitoredProcess], key: str) -> list[MonitoredProcess]:
+    """Sessões curtas (PJe, ~15 min): os processos já encontrados neste site sempre entram;
+    os ainda sem site entram no máximo MAX_DISCOVERY_SHORT_SESSION por rodada, primeiro os
+    que têm este site como mais provável (ex.: numeração PJe)."""
+    known = [p for p in group if p.source_key == key]
+    unknown = [p for p in group if p.source_key != key]
+    unknown.sort(key=lambda p: candidate_keys(p.cnj)[0] != key)
+    return known + unknown[:MAX_DISCOVERY_SHORT_SESSION]
 
 
 def dump_structure(page: Any, target: Path) -> Path:
@@ -192,6 +203,8 @@ class MonitorService:
                 for p in pending.values()
                 if key == p.source_key or (p.source_key is None and should_try(p, key))
             ]
+            if endpoint.headless_blocked:
+                group = limit_discovery(group, key)
             if not group:
                 continue
             touched.update(p.id for p in group)
@@ -287,7 +300,8 @@ class MonitorService:
                         outcome.detail = f"{endpoint.key}: não encontrado"
                         self._lookup(process, endpoint, "NOT_FOUND", None)
                     else:
-                        self._fail(process, endpoint, outcome, exc.code.value, str(exc), None)
+                        page = context.pages[-1] if context.pages else None
+                        self._fail(process, endpoint, outcome, exc.code.value, str(exc), page)
                     continue
                 except Exception as exc:
                     # Erro inesperado (navegador, site lento, mudança de tela): registra e segue.

@@ -17,8 +17,10 @@ from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber
 from legal_monitor.domain.enums import ErrorCode
 from legal_monitor.monitoring.monitor import (
+    MAX_DISCOVERY_SHORT_SESSION,
     MonitorService,
     ProcessOutcome,
+    limit_discovery,
     movement_from_item,
     next_candidate,
 )
@@ -236,6 +238,18 @@ class MonitorServiceTests(unittest.TestCase):
         # Depois de 24 h volta a procurar no primeiro site (processos migram de sistema).
         stale = {(legacy.id, "eproc-tjrj-1g"): ("NOT_FOUND", now - timedelta(hours=25))}
         self.assertEqual(next_candidate(legacy, stale, now), "eproc-tjrj-1g")
+
+    def test_short_session_site_limits_discovery_but_keeps_known_processes(self) -> None:
+        pje_numbered = CnjNumber.from_components(
+            sequence=876_543, year=2025, justice=8, tribunal=19, origin=209
+        )
+        known = MonitoredProcess(uuid.uuid4(), pje_numbered, "TJRJ", "pje-tjrj-1g")
+        legacy = [MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None) for _ in range(20)]
+        new_pje = MonitoredProcess(uuid.uuid4(), pje_numbered, "TJRJ", None)
+        group = limit_discovery([known, *legacy, new_pje], "pje-tjrj-1g")
+        self.assertEqual(group[0], known)  # já encontrado: sempre verificado
+        self.assertEqual(group[1], new_pje)  # numeração PJe tem prioridade na descoberta
+        self.assertEqual(len(group), 1 + MAX_DISCOVERY_SHORT_SESSION)
 
     def test_fingerprint_is_stable_across_runs(self) -> None:
         item = timeline("Decisão C")[0]

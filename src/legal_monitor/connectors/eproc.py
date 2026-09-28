@@ -26,6 +26,7 @@ from legal_monitor.connectors.pje import (
     FORBIDDEN_PATTERN,
     TimelineDocument,
     TimelineItem,
+    _strip_accents,
     items_from_payload,
 )
 from legal_monitor.connectors.routing import SourceEndpoint
@@ -39,6 +40,8 @@ DOCUMENT_ACTIONS = frozenset(
     {"acessar_documento", "acessar_documento_implementacao", "acessar_documento_publico"}
 )
 PROCESS_ACTIONS = frozenset({"processo_selecionar"})
+# Mensagem do eproc para busca sem resultado (texto já sem acentos).
+NOT_FOUND_TEXT = re.compile(r"nao encontrad|nenhum (?:processo|registro)", re.IGNORECASE)
 _EMBEDDED_DOCUMENT = re.compile(
     r"""(?:src|data|href)\s*=\s*["']([^"']*acao=acessar_documento_implementacao[^"']*)["']""",
     re.IGNORECASE,
@@ -126,8 +129,17 @@ class EprocConnector:
                 with contextlib.suppress(Exception):
                     page.wait_for_load_state("networkidle", timeout=30_000)
                 return page
-        page.close()
-        raise ConnectorError(ErrorCode.SOURCE_UNAVAILABLE, "Processo não encontrado nesta fonte")
+        # "Não encontrado" só com a mensagem do próprio eproc; qualquer outra tela vira erro
+        # com diagnóstico (a página fica aberta para o registro de estrutura).
+        body = ""
+        with contextlib.suppress(Exception):
+            body = _strip_accents(page.locator("body").inner_text(timeout=5_000))
+        if NOT_FOUND_TEXT.search(body):
+            page.close()
+            raise ConnectorError(
+                ErrorCode.SOURCE_UNAVAILABLE, "Processo não encontrado nesta fonte"
+            )
+        raise ConnectorError(ErrorCode.PARSE_ERROR, "Resultado da busca do eproc não reconhecido")
 
     def read_timeline(self, autos: Page) -> tuple[TimelineItem, ...]:
         payload = autos.evaluate(_EVENTS_JS, FORBIDDEN_PATTERN)

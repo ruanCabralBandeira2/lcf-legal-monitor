@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from legal_monitor.connectors.eproc import _EVENTS_JS, EprocConnector, action_of
+from legal_monitor.connectors.eproc import (
+    _EVENTS_JS,
+    NOT_FOUND_TEXT,
+    EprocConnector,
+    action_of,
+)
 from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.pje import FORBIDDEN_PATTERN, items_from_payload
 from legal_monitor.connectors.routing import CATALOG
@@ -64,6 +69,10 @@ class EprocConnectorTests(unittest.TestCase):
             with self.assertRaises(ConnectorError, msg=bad):
                 connector._allowed_document_url(bad)
         self.assertEqual(action_of(base + "processo_selecionar&num=1"), "processo_selecionar")
+
+    def test_not_found_requires_the_eproc_message(self) -> None:
+        self.assertTrue(NOT_FOUND_TEXT.search("Processo nao encontrado. [00000000000000000000]"))
+        self.assertFalse(NOT_FOUND_TEXT.search("Painel do Advogado - Consulta Processual"))
 
     def test_rejects_non_eproc_source(self) -> None:
         with self.assertRaises(ValueError):

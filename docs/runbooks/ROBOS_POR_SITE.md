@@ -38,7 +38,9 @@ powershell -ExecutionPolicy Bypass -File ops\windows\registrar-robos.ps1
 
 - eproc: de hora em hora com `--no-interactive-login`. Sessão caída gera um e-mail "login necessário"; rode `auth-open <site>`.
 - PJe: 06:00 e 18:00 com login interativo; o e-mail "aprove/digite o PIN" chega e o operador digita o PIN remotamente.
-- Logs em `logs\robo-<site>.log`. Remover: `registrar-robos.ps1 -Remover`.
+- Logs em `logs\robo-<site>.log` (saída do agendador) e `logs\monitor-<site>-<data>.json` (resultado de cada rodada, números mascarados). Remover: `registrar-robos.ps1 -Remover`.
+- As tarefas rodam ocultas (`executar-oculto.vbs`): fechar uma janela de console mataria o robô. Depois de atualizar o projeto, rode o script de registro de novo.
+- Os robôs agendados executam esta mesma cópia do projeto: durante o desenvolvimento, mudanças de código e banco valem já na rodada seguinte.
 
 ## Regras que os robôs seguem
 

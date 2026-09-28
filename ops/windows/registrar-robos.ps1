@@ -43,10 +43,14 @@ $JanelasDeLogin = @{
     "pje-trt1-1g" = @("06:20", "18:20")
 }
 
+$Oculto = Join-Path $PSScriptRoot "executar-oculto.vbs"
+if (-not (Test-Path $Oculto)) { throw "executar-oculto.vbs nao encontrado em $Oculto" }
+
 function Registrar-Robo([string]$Site, [string]$Argumentos, $Gatilhos) {
     $Log = Join-Path $Logs "robo-$Site.log"
-    $Acao = New-ScheduledTaskAction -Execute "cmd.exe" `
-        -Argument "/c `"`"$Exe`" $Argumentos >> `"$Log`" 2>&1`"" `
+    # Sem janela de console: fechar o console mataria o robo (codigo 3221225786).
+    $Acao = New-ScheduledTaskAction -Execute "wscript.exe" `
+        -Argument "//B //NoLogo `"$Oculto`" `"$Exe`" `"$Argumentos`" `"$Log`"" `
         -WorkingDirectory $Projeto
     $Config = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable `
         -ExecutionTimeLimit (New-TimeSpan -Hours 1) -AllowStartIfOnBatteries `

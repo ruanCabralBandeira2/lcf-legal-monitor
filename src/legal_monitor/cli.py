@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import getpass
 import importlib.util
 import json
 import platform
 import sys
 import tempfile
+import time
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
@@ -413,6 +415,48 @@ def auth_check(source: str | None, notify: bool) -> int:
     return 0 if all_valid else 1
 
 
+def session_watch(source: str, every_minutes: int, max_hours: float, notify: bool) -> int:
+    """Mede quanto tempo a sessão humana dura sob verificações periódicas."""
+    settings = Settings.from_env()
+    endpoint = get_endpoint(source)
+    manager = _session_manager(settings)
+    log_path = settings.temp_dir / f"session-watch-{source}.csv"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    started = datetime.now(UTC)
+    first_valid: datetime | None = None
+    last_valid: datetime | None = None
+    with log_path.open("a", encoding="utf-8") as log:
+        while (datetime.now(UTC) - started).total_seconds() < max_hours * 3600:
+            now = datetime.now(UTC)
+            state = manager.check(endpoint).state
+            log.write(f"{now.isoformat()},{source},{state.value}\n")
+            log.flush()
+            print(
+                f"{now.astimezone().strftime('%H:%M:%S')} {source}: {state.value}", file=sys.stderr
+            )
+            if state is SessionState.VALID:
+                first_valid = first_valid or now
+                last_valid = now
+            elif state in (SessionState.AUTH_REQUIRED, SessionState.CAPTCHA_REQUIRED):
+                if notify:
+                    with contextlib.suppress(Exception):
+                        _auth_alert_service(settings).handle(endpoint, state, now=now)
+                break
+            time.sleep(every_minutes * 60)
+    duration = (last_valid - first_valid).total_seconds() / 60 if first_valid and last_valid else 0
+    _emit(
+        {
+            "source": source,
+            "first_valid": first_valid.isoformat() if first_valid else None,
+            "last_valid": last_valid.isoformat() if last_valid else None,
+            "valid_for_at_least_minutes": round(duration, 1),
+            "check_interval_minutes": every_minutes,
+            "log": str(log_path),
+        }
+    )
+    return 0
+
+
 def fetch_latest(number: str, send: bool, source: str | None) -> int:
     settings = Settings.from_env()
     cnj = CnjNumber.parse(number)
@@ -654,6 +698,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     auth_check_parser.add_argument("source", nargs="?", choices=sorted(CATALOG))
     auth_check_parser.add_argument("--notify", action="store_true")
+    watch_parser = subcommands.add_parser(
+        "session-watch", help="mede a duração real da sessão com verificações periódicas"
+    )
+    watch_parser.add_argument("source", choices=sorted(CATALOG))
+    watch_parser.add_argument("--every", type=int, default=5, help="minutos entre verificações")
+    watch_parser.add_argument("--max-hours", type=float, default=12.0)
+    watch_parser.add_argument("--notify", action="store_true")
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -703,6 +754,8 @@ def main(argv: list[str] | None = None) -> int:
             return auth_open(args.source, not args.no_certificate)
         if args.command == "auth-check":
             return auth_check(args.source, args.notify)
+        if args.command == "session-watch":
+            return session_watch(args.source, args.every, args.max_hours, args.notify)
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

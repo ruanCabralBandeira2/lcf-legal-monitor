@@ -13,7 +13,7 @@
 | Router CNJ -> fontes (eproc TJRJ, PJe TJRJ, eproc TRF2, PDPJ) | `legal_monitor.connectors.routing`, `sources-for`, ADR-007 | implementado e testado |
 | Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004, `tests/test_manual_action_postgres.py` | implementado; migração 004 validada no PostgreSQL; login real com token validado em 28/09/2026 no eproc TJRJ 1g (Windows/Edge); Mac pendente |
 | Ambiente Windows-first e plano de migração ao Mac | `docs/runbooks/AMBIENTE_WINDOWS.md` | validado em 28/09/2026 |
-| Conector PJe (consulta, linha do tempo, download) | `legal_monitor.connectors.pje`, `fetch-latest`, ADR-008, `tests/test_pje.py` | implementado; primeiro uso real pelo operador pendente |
+| Conector PJe (consulta, linha do tempo, download) | `legal_monitor.connectors.pje`, `fetch-latest`, ADR-008, `tests/test_pje.py` | primeiro ciclo real validado em 28/09/2026 (PJe TJRJ 1g, e-mail com PDF); filtro de controles de escrita reforçado |
 | Parser/download eproc | ADR-007 | não iniciado; processo-piloto está no PJe |
 | Canal e-mail | `legal_monitor.notifications.email`, `secret-set`, `email-test`, `docs/runbooks/EMAIL.md` | implementado; envio real validado em 28/09/2026 (email-test) |
 | DJEN produção | host guard implementado; cliente real no M6 | parcial |
@@ -30,3 +30,4 @@
 | M3 - auditoria e ciclo de vida | eventos de cadastro/desativação e exclusão lógica | implementado; histórico preservado |
 | M3 - API/painel em rede | CLI administrativa é a interface mínima atual | adiado até definir autenticação e exposição local |
 | API Pública DataJud | `docs/research/DATAJUD_API.md`, `ADR-005` | estudo concluído: metadados/movimentos, sem peças; não consumida e aguarda aceite expresso |
+| Medição de duração da sessão | `session-watch`, CSV em `storage/tmp` | implementado; medição PJe/eproc em andamento |

@@ -27,10 +27,14 @@ from legal_monitor.domain.enums import ErrorCode
 if TYPE_CHECKING:
     from playwright.sync_api import BrowserContext, Page
 
-FORBIDDEN_CONTROL = re.compile(
-    r"peticion|assinar|ci[eê]ncia|excluir|remover|juntar|protocol|encerrar|sair|expediente",
-    re.IGNORECASE,
+# Mantido em sincronia com FORBIDDEN_JS abaixo. "Adicionar lembretes" foi clicado no 1º uso
+# real (28/09/2026) por conter "documento" no onclick; desde então é recusado na coleta.
+FORBIDDEN_PATTERN = (
+    r"peticion|assinar|ci[eê]ncia|excluir|remover|juntar|protocol|encerrar|sair|expediente|"
+    r"lembrete|anota[cç]|adicionar|incluir|editar|alterar|enviar|responder|sigilo|"
+    r"visibilidade|cancelar|desentranh"
 )
+FORBIDDEN_CONTROL = re.compile(FORBIDDEN_PATTERN, re.IGNORECASE)
 DOCUMENT_ID = re.compile(r"idProcessoDoc(?:umento)?[=:'\"\s]+(\d+)|idDocumento[=:'\"\s]+(\d+)")
 _MONTHS = {
     "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
@@ -40,7 +44,8 @@ _MONTHS = {
 # Extração tolerante da linha do tempo: marca cada link de documento com data-lcf-doc
 # para que o Python clique exatamente no elemento lido, sem seletores frágeis.
 _TIMELINE_JS = r"""
-() => {
+(forbiddenSource) => {
+  const forbidden = new RegExp(forbiddenSource, 'i');
   const candidates = ['#divTimeLine', "[id$='divTimeLine']", "[id*='TimeLine']", '.timeline'];
   let root = null;
   for (const sel of candidates) { root = document.querySelector(sel); if (root) break; }
@@ -61,12 +66,20 @@ _TIMELINE_JS = r"""
     if (!node.classList.contains('media') && node.tagName !== 'LI') return;
     node.querySelectorAll('*').forEach((child) => seen.add(child));
     const docs = [];
+    const found = [];
     node.querySelectorAll('a').forEach((a) => {
       const hint = (a.getAttribute('href') || '') + ' ' + (a.getAttribute('onclick') || '');
       if (!/idProcessoDoc|idDocumento|documento/i.test(hint)) return;
+      const label = (a.innerText || a.title || '').replace(/\s+/g, ' ').trim();
+      const title = a.getAttribute('title') || '';
+      if (forbidden.test(label) || forbidden.test(title)) return;
+      found.push({a, label, hint, explicit: /idProcessoDoc|idDocumento/i.test(hint)});
+    });
+    found.sort((x, y) => Number(y.explicit) - Number(x.explicit));
+    found.forEach(({a, label, hint}) => {
       const tag = `${items.length}-${docs.length}`;
       a.setAttribute('data-lcf-doc', tag);
-      docs.push({tag, label: (a.innerText || a.title || '').replace(/\s+/g, ' ').trim(), hint});
+      docs.push({tag, label, hint});
     });
     items.push({date: currentDate, text, docs});
   });
@@ -200,7 +213,7 @@ class PjeConnector:
         return autos
 
     def read_timeline(self, autos: Page) -> tuple[TimelineItem, ...]:
-        payload = autos.evaluate(_TIMELINE_JS)
+        payload = autos.evaluate(_TIMELINE_JS, FORBIDDEN_PATTERN.replace("ç", "c"))
         items = items_from_payload(payload)
         if not payload.get("found") or not items:
             raise ConnectorError(ErrorCode.PARSE_ERROR, "Linha do tempo do PJe não reconhecida")

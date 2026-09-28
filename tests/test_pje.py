@@ -46,7 +46,15 @@ class PjeParsingTests(unittest.TestCase):
         self.assertEqual(items[1].documents, ())
 
     def test_write_controls_are_forbidden(self) -> None:
-        for label in ("Peticionar", "Assinar documento", "Dar ciência", "Expedientes", "Sair"):
+        for label in (
+            "Peticionar",
+            "Assinar documento",
+            "Dar ciência",
+            "Expedientes",
+            "Sair",
+            "Adicionar lembretes",
+            "Incluir anotação",
+        ):
             self.assertTrue(FORBIDDEN_CONTROL.search(label), label)
         for label in ("Decisão", "Juntada de petição", "Despacho", "Sentença"):
             self.assertFalse(FORBIDDEN_CONTROL.search(label), label)

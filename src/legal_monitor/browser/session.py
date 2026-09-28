@@ -174,12 +174,16 @@ class BrowserSessionManager:
                 try:
                     yield context
                 finally:
-                    self._save_state(context, state_path)
-                    with contextlib.suppress(PlaywrightError):
-                        context.close()
+                    # Se a pessoa fechou a janela, o navegador já morreu: salvar/fechar de novo
+                    # travava o programa para sempre (casos de 28/09/2026 no PJe e no TRF4).
+                    if browser.is_connected():
+                        self._save_state(context, state_path)
+                        with contextlib.suppress(PlaywrightError):
+                            context.close()
             finally:
-                with contextlib.suppress(PlaywrightError):
-                    browser.close()
+                if browser.is_connected():
+                    with contextlib.suppress(PlaywrightError):
+                        browser.close()
 
     def login(
         self,

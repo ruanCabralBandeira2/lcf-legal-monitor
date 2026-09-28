@@ -40,6 +40,7 @@ $DeHoraEmHora = @(
 # PJe: sessão curta (~15 min). Janelas fixas com login interativo (PIN digitado remotamente).
 $JanelasDeLogin = @{
     "pje-tjrj-1g" = @("06:00", "18:00")
+    "pje-tjrj-2g" = @("06:10", "18:10")
     "pje-trt1-1g" = @("06:20", "18:20")
 }
 

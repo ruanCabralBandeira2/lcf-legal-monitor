@@ -747,7 +747,63 @@ def _portal_explore(page: Any, formatted: str, out_dir: Path, stamp: str) -> dic
     return found
 
 
-def tjrj_diagnostic(number: str, skip_portal: bool, with_public: bool = False) -> int:
+def _guided_recording(
+    context: Any,
+    formatted: str,
+    out_dir: Path,
+    stamp: str,
+    api_calls: list[str],
+    trail: list[str],
+) -> dict[str, Any]:
+    """A pessoa navega no Portal (o SPA tem animações que confundem cliques automáticos);
+    o robô só grava rotas, endereços internos e a estrutura final, tudo sem conteúdo."""
+    before_calls = len(api_calls)
+    before_trail = len(trail)
+    print(
+        "\nNa janela do Portal, faça você mesmo:\n"
+        "  1. Consultas -> Consultas Processuais\n"
+        f"  2. pesquise o processo {formatted}\n"
+        "  3. abra o processo até ver as movimentações (e, se houver, a lista de peças)\n"
+        "Não clique em nada de petição. O robô só grava o caminho e a estrutura da tela.",
+        file=sys.stderr,
+    )
+    input("Quando estiver na tela do processo, volte aqui e pressione Enter... ")
+    tabs = [tab for tab in context.pages if not tab.is_closed()]
+    final = next(
+        (
+            tab
+            for tab in reversed(tabs)
+            if "tjrj.jus.br" in tab.url and not tab.url.startswith("https://www.tjrj.jus.br")
+        ),
+        tabs[-1] if tabs else None,
+    )
+    result: dict[str, Any] = {
+        "trilha_da_navegacao": trail[before_trail:][:60],
+        "enderecos_internos": api_calls[before_calls:][:80],
+        "abas": [_route(tab.url) for tab in tabs],
+    }
+    if final is None:
+        return result
+    path = out_dir / f"estrutura-tjrj-portal-processo-{stamp}.json"
+    EprocConnector.dump_structure(final, path)
+    result["tela_final"] = {
+        "rota": _route(final.url),
+        "tabelas": final.locator("table").count(),
+        "linhas": final.locator("table tr, mat-row").count(),
+        "paineis": final.locator("mat-expansion-panel, mat-card, .card").count(),
+        "links_documento": final.locator(
+            "a[href*='document' i], a[href*='peca' i], a[href*='download' i], "
+            "a[href*='visualiz' i], [class*='document' i]"
+        ).count(),
+        "rotulos_da_tela": [_masked(label, 40) for label, _ in final.evaluate(_UI_LABELS_JS)][:60],
+        "estrutura": str(path),
+    }
+    return result
+
+
+def tjrj_diagnostic(
+    number: str, skip_portal: bool, with_public: bool = False, automatic: bool = False
+) -> int:
     """Testa as duas vias do TJRJ legado para UM processo e devolve só estrutura (ADR-008):
     A) consulta pública sem login; B) Portal de Serviços após login humano com certificado."""
     from playwright.sync_api import sync_playwright
@@ -820,6 +876,18 @@ def tjrj_diagnostic(number: str, skip_portal: bool, with_public: bool = False) -
                     )
 
                 context.on("page", lambda tab: (trail.append("[nova aba]"), track(tab)))
+                # Endereços internos que o Portal consulta (método, host e caminho mascarado;
+                # sem parâmetros nem respostas): mostram de onde vêm as movimentações.
+                api_calls: list[str] = []
+
+                def record_call(request: Any) -> None:
+                    if request.resource_type in ("xhr", "fetch"):
+                        target = urlparse(request.url)
+                        entry = f"{request.method} {target.hostname}{_masked(target.path, 140)}"
+                        if entry not in api_calls:
+                            api_calls.append(entry)
+
+                context.on("request", record_call)
                 page = context.new_page()
                 page.goto(endpoint.base_url, wait_until="domcontentloaded")
                 page.wait_for_selector(endpoint.certificate_login_selector or "img", timeout=20_000)
@@ -875,7 +943,7 @@ def tjrj_diagnostic(number: str, skip_portal: bool, with_public: bool = False) -
                     "campos": fields,
                     "estrutura": str(path),
                 }
-                if "portalservicos" in page.url:
+                if "portalservicos" in page.url and automatic:
                     try:
                         report["portal"]["consulta"] = _portal_explore(
                             page, formatted, out_dir, stamp
@@ -884,6 +952,10 @@ def tjrj_diagnostic(number: str, skip_portal: bool, with_public: bool = False) -
                         report["portal"]["consulta_erro"] = _masked(
                             f"{type(exc).__name__}: {exc}", 200
                         )
+                elif "portalservicos" in page.url:
+                    report["portal"]["gravacao"] = _guided_recording(
+                        context, formatted, out_dir, stamp, api_calls, trail
+                    )
             finally:
                 if browser.is_connected():
                     browser.close()
@@ -1235,6 +1307,11 @@ def build_parser() -> argparse.ArgumentParser:
     tjrj_parser.add_argument(
         "--com-publica", action="store_true", help="inclui o teste da consulta pública"
     )
+    tjrj_parser.add_argument(
+        "--automatico",
+        action="store_true",
+        help="tenta navegar sozinho no Portal (padrão: você navega e o robô grava)",
+    )
     latest_parser = subcommands.add_parser(
         "fetch-latest",
         help="busca a última movimentação, baixa o documento e (--send) envia ao advogado",
@@ -1297,7 +1374,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diagnostico-estrutura":
             return structure_diagnostic(args.number, args.site)
         if args.command == "diagnostico-tjrj":
-            return tjrj_diagnostic(args.number, args.sem_portal, args.com_publica)
+            return tjrj_diagnostic(args.number, args.sem_portal, args.com_publica, args.automatico)
         if args.command == "fetch-latest":
             return fetch_latest(args.number, args.send, args.source)
     except (

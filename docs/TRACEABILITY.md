@@ -10,7 +10,7 @@
 | Domínio CNJ e estados | `legal_monitor.domain` | implementado antecipadamente |
 | Connector SDK/fake | `legal_monitor.connectors` | implementado antecipadamente |
 | Documento/integração | `legal_monitor.documents` | fatia segura implementada |
-| Router CNJ -> fontes (eproc TJRJ, eproc TRF2, PDPJ) | `legal_monitor.connectors.routing`, `sources-for`, ADR-007 | implementado e testado |
+| Router CNJ -> fontes (eproc TJRJ, PJe TJRJ, eproc TRF2, PDPJ) | `legal_monitor.connectors.routing`, `sources-for`, ADR-007 | implementado e testado |
 | Sessão Playwright + token USB + aviso 2FA no celular | `legal_monitor.browser.session`, `auth-open`, `auth-check`, `legal_monitor.monitoring`, migração 004, `tests/test_manual_action_postgres.py` | implementado; migração 004 validada no PostgreSQL; login real com token validado em 28/09/2026 no eproc TJRJ 1g (Windows/Edge); Mac pendente |
 | Ambiente Windows-first e plano de migração ao Mac | `docs/runbooks/AMBIENTE_WINDOWS.md` | validado em 28/09/2026 |
 | Parser/download eproc | ADR-007 | não iniciado; depende de HTML real sanitizado |

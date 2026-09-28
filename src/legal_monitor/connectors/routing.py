@@ -25,6 +25,8 @@ class SourceEndpoint:
     notes: str
     # Texto do botão oficial de login por certificado (token USB). None = sem opção conhecida.
     certificate_login_label: str | None = None
+    # A fonte recusa navegador sem janela (ex.: HTTP 403). Nunca contornar: usar janela visível.
+    headless_blocked: bool = False
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
@@ -60,6 +62,26 @@ CATALOG: dict[str, SourceEndpoint] = {
             certificate_login_label="Certificado Digital",
         ),
         SourceEndpoint(
+            key="pje-tjrj-1g",
+            tribunal="TJRJ",
+            system=SourceSystem.PJE,
+            base_url="https://tjrj.pje.jus.br/1g/login.seam",
+            auth_realm="jusbr",
+            notes="PJe TJRJ 1º grau; login via SSO Jus.br; responde 403 a navegador headless",
+            certificate_login_label="certificado digital",
+            headless_blocked=True,
+        ),
+        SourceEndpoint(
+            key="pje-tjrj-2g",
+            tribunal="TJRJ",
+            system=SourceSystem.PJE,
+            base_url="https://tjrj.pje.jus.br/2g/login.seam",
+            auth_realm="jusbr",
+            notes="PJe TJRJ 2º grau; login via SSO Jus.br; comportamento headless a confirmar",
+            certificate_login_label="certificado digital",
+            headless_blocked=True,
+        ),
+        SourceEndpoint(
             key="eproc-trf2",
             tribunal="TRF2",
             system=SourceSystem.EPROC,
@@ -81,7 +103,9 @@ CATALOG: dict[str, SourceEndpoint] = {
 
 # Segmento J.TR do número CNJ -> fontes candidatas, em ordem de preferência.
 _ROUTES: dict[tuple[str, str], tuple[str, ...]] = {
-    ("8", "19"): ("eproc-tjrj-1g", "eproc-tjrj-2g", "pdpj"),
+    # Sequencial iniciado em "08" costuma nascer no PJe TJRJ; a ordem aqui é só preferência,
+    # a descoberta real registra a fonte que encontrou o processo.
+    ("8", "19"): ("eproc-tjrj-1g", "pje-tjrj-1g", "eproc-tjrj-2g", "pje-tjrj-2g", "pdpj"),
     ("4", "02"): ("eproc-trf2", "pdpj"),
 }
 _FALLBACK: tuple[str, ...] = ("pdpj",)

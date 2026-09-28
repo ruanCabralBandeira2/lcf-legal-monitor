@@ -143,6 +143,9 @@ class BrowserSessionManager:
     def check(self, endpoint: SourceEndpoint) -> SessionCheck:
         if not self.has_saved_state(endpoint):
             return SessionCheck(endpoint.key, SessionState.AUTH_REQUIRED, "")
+        if endpoint.headless_blocked and self._headless:
+            # A fonte recusa navegador sem janela; não há contorno. Decisão registrada no ADR-007.
+            return SessionCheck(endpoint.key, SessionState.UNAVAILABLE, "headless-blocked")
         try:
             with self.context(endpoint) as context:
                 page = context.new_page()

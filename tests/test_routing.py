@@ -22,7 +22,15 @@ def _cnj(justice: int, tribunal: int) -> CnjNumber:
 class RoutingTests(unittest.TestCase):
     def test_tjrj_routes_to_eproc_then_pdpj(self) -> None:
         keys = [item.key for item in candidate_sources(_cnj(8, 19))]
-        self.assertEqual(keys, ["eproc-tjrj-1g", "eproc-tjrj-2g", "pdpj"])
+        self.assertEqual(
+            keys, ["eproc-tjrj-1g", "pje-tjrj-1g", "eproc-tjrj-2g", "pje-tjrj-2g", "pdpj"]
+        )
+
+    def test_pje_tjrj_shares_jusbr_login_and_is_marked_headless_blocked(self) -> None:
+        pje = CATALOG["pje-tjrj-1g"]
+        self.assertIs(pje.system, SourceSystem.PJE)
+        self.assertEqual(pje.auth_realm, "jusbr")
+        self.assertTrue(pje.headless_blocked)
 
     def test_trf2_routes_to_eproc_trf2(self) -> None:
         keys = [item.key for item in candidate_sources(_cnj(4, 2))]

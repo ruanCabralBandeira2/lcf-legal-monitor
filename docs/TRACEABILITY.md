@@ -35,3 +35,5 @@
 | Robôs por site e agendas | `monitor-run --site`, `--no-interactive-login`, `ops/windows/registrar-robos.ps1`, ADR-009, `docs/runbooks/ROBOS_POR_SITE.md` | implementado; agendamento a registrar pelo operador após validar cada site |
 | Conector eproc (TJRJ, JFRJ, TRF2, TRF4) | `legal_monitor.connectors.eproc`, `tests/test_eproc.py` | extração validada em página sintética no Edge; 1º uso real pendente |
 | Processos restritos e eventos de intimação | `MonitoredProcess.sensitivity`, `TimelineItem.documents_allowed` | e-mail só aviso para RESTRICTED; documentos de intimação/citação nunca abertos |
+| Resultado de procura por site e registro da rodada | migração 006 `source_lookup`, `logs/monitor-<site>-<data>.json`, `sites-report` (procura) | implementado após a 1ª tentativa real sem sucesso (28/09/2026) |
+| Prova positiva de login no eproc | `SourceEndpoint.logged_in_selector`, `classify_session` | corrige falso positivo da tela externa da JFRJ |

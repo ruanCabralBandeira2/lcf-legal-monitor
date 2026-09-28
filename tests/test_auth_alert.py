@@ -60,6 +60,35 @@ class ClassifySessionTests(unittest.TestCase):
         self.assertIs(state, SessionState.VALID)
 
 
+class LoggedOutPagesTests(unittest.TestCase):
+    def test_eproc_external_controller_is_never_a_valid_session(self) -> None:
+        # Caso real de 28/09/2026: a tela de login da JFRJ foi tomada por sessão válida.
+        state = classify_session(
+            final_url="https://eproc.jfrj.jus.br/eproc/externo_controlador.php",
+            expected_host="eproc.jfrj.jus.br",
+            has_password_field=False,
+            has_captcha=False,
+        )
+        self.assertIs(state, SessionState.AUTH_REQUIRED)
+
+    def test_marker_is_required_when_source_defines_it(self) -> None:
+        common = {
+            "final_url": "https://eproc.jfrj.jus.br/eproc/controlador.php?acao=painel",
+            "expected_host": "eproc.jfrj.jus.br",
+            "has_password_field": False,
+            "has_captcha": False,
+        }
+        self.assertIs(
+            classify_session(**common, has_logged_in_marker=False), SessionState.AUTH_REQUIRED
+        )
+        self.assertIs(classify_session(**common, has_logged_in_marker=True), SessionState.VALID)
+
+    def test_every_eproc_source_has_logged_in_marker(self) -> None:
+        for endpoint in CATALOG.values():
+            if endpoint.system.value == "EPROC":
+                self.assertIn("txtNumProcessoPesquisaRapida", endpoint.logged_in_selector or "")
+
+
 class VisibleWindowPolicyTests(unittest.TestCase):
     def test_blocked_source_uses_visible_window_only_when_authorized(self) -> None:
         from pathlib import Path

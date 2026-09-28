@@ -7,6 +7,8 @@ from legal_monitor.domain.cnj import CnjNumber
 from legal_monitor.domain.enums import SourceSystem
 
 JUSBR_SSO_HOST = "sso.cloud.pje.jus.br"
+# Elementos que só existem no eproc com sessão ativa (a tela externa/de login não os tem).
+EPROC_LOGGED_IN_SELECTOR = "#txtNumProcessoPesquisaRapida, a[href*='acao=sair']"
 
 
 class UnknownSourceError(ValueError):
@@ -27,11 +29,16 @@ class SourceEndpoint:
     certificate_login_label: str | None = None
     # A fonte recusa navegador sem janela (ex.: HTTP 403). Nunca contornar: usar janela visível.
     headless_blocked: bool = False
+    # Elemento que só existe com sessão ativa (prova positiva de login). None = não verificado.
+    logged_in_selector: str | None = None
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
         if parsed.scheme != "https" or not (parsed.hostname or "").endswith(".jus.br"):
             raise ValueError("Fonte oficial exige HTTPS em domínio .jus.br")
+        if self.system is SourceSystem.EPROC and self.logged_in_selector is None:
+            # Todo eproc logado tem a busca rápida e o link de encerrar sessão.
+            object.__setattr__(self, "logged_in_selector", EPROC_LOGGED_IN_SELECTOR)
 
     @property
     def host(self) -> str:

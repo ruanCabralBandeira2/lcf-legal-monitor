@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import contextlib
 import tempfile
+import types
 import unittest
 import uuid
 import zlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from unittest import mock
 
+from legal_monitor.connectors.errors import ConnectorError
 from legal_monitor.connectors.pje import TimelineItem, items_from_payload
 from legal_monitor.connectors.routing import CATALOG
 from legal_monitor.documents.service import DocumentService
 from legal_monitor.domain.cnj import CnjNumber
-from legal_monitor.monitoring.monitor import MonitorService, ProcessOutcome, movement_from_item
+from legal_monitor.domain.enums import ErrorCode
+from legal_monitor.monitoring.monitor import (
+    MonitorService,
+    ProcessOutcome,
+    movement_from_item,
+    next_candidate,
+)
 from legal_monitor.monitoring.monitor_repository import MonitoredProcess
 from legal_monitor.notifications.base import NotificationMessage, NotificationReceipt
 from tests.helpers import blank_pdf_bytes
@@ -25,6 +35,7 @@ class FakeRepo:
         self.documents: list[str] = []
         self.sources: list[str] = []
         self.checked: list[str] = []
+        self.lookups_recorded: list[tuple[str, str]] = []
 
     def known_fingerprints(self, process_id: uuid.UUID, source: str) -> set[str]:
         return set(self.movements)
@@ -43,6 +54,12 @@ class FakeRepo:
 
     def mark_checked(self, process_id, *, status, at, success) -> None:
         self.checked.append(status)
+
+    def record_lookup(self, process_id, source_key, *, result, detail, at) -> None:
+        self.lookups_recorded.append((source_key, result))
+
+    def lookups(self) -> dict:
+        return {}
 
 
 class FakeConnector:
@@ -168,6 +185,57 @@ class MonitorServiceTests(unittest.TestCase):
         _, connector = self._run(timeline("Intimação Eletrônica - Expedida"))
         self.assertEqual(connector.downloads, [])
         self.assertEqual(len(self.notifier.sent), 1)  # o aviso sai mesmo assim
+
+    def test_unexpected_error_in_one_process_does_not_stop_the_others(self) -> None:
+        processes = [MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None) for _ in range(3)]
+        outcomes = {p.id: ProcessOutcome(process=CNJ.masked()) for p in processes}
+        errors = [
+            ConnectorError(ErrorCode.SOURCE_UNAVAILABLE, "não encontrado"),
+            TimeoutError("Timeout 30000ms exceeded while filling 1234567-89.2025.8.19.0209"),
+            ConnectorError(ErrorCode.SOURCE_UNAVAILABLE, "não encontrado"),
+        ]
+
+        class RaisingConnector:
+            def open_autos(self, context, cnj):
+                raise errors.pop(0)
+
+        class FakeSessions:
+            def headless_for(self, endpoint) -> bool:
+                return True
+
+            @contextlib.contextmanager
+            def context(self, endpoint, headless=None):
+                yield types.SimpleNamespace(pages=[])
+
+        self.service._sessions = FakeSessions()
+        with mock.patch(
+            "legal_monitor.monitoring.monitor.connector_for", return_value=RaisingConnector()
+        ):
+            found = self.service._run_group(self.endpoint, processes, outcomes)
+        self.assertEqual(found, set())
+        self.assertEqual(
+            [outcomes[p.id].status for p in processes], ["NOT_FOUND", "ERROR", "NOT_FOUND"]
+        )
+        # Número do processo nunca vai para o detalhe gravado em log/banco.
+        self.assertNotIn("1234567", outcomes[processes[1].id].detail)
+        self.assertEqual(
+            self.repo.lookups_recorded,
+            [
+                ("pje-tjrj-1g", "NOT_FOUND"),
+                ("pje-tjrj-1g", "ERROR"),
+                ("pje-tjrj-1g", "NOT_FOUND"),
+            ],
+        )
+
+    def test_discovery_moves_to_next_site_after_not_found(self) -> None:
+        now = datetime(2026, 9, 28, 20, tzinfo=UTC)
+        legacy = MonitoredProcess(uuid.uuid4(), CNJ, "TJRJ", None)
+        self.assertEqual(next_candidate(legacy, {}, now), "eproc-tjrj-1g")
+        lookups = {(legacy.id, "eproc-tjrj-1g"): ("NOT_FOUND", now - timedelta(hours=1))}
+        self.assertEqual(next_candidate(legacy, lookups, now), "pje-tjrj-1g")
+        # Depois de 24 h volta a procurar no primeiro site (processos migram de sistema).
+        stale = {(legacy.id, "eproc-tjrj-1g"): ("NOT_FOUND", now - timedelta(hours=25))}
+        self.assertEqual(next_candidate(legacy, stale, now), "eproc-tjrj-1g")
 
     def test_fingerprint_is_stable_across_runs(self) -> None:
         item = timeline("Decisão C")[0]

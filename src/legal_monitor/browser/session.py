@@ -46,14 +46,32 @@ def _host_path(url: str) -> str:
     return f"{parsed.hostname or ''}{parsed.path}"
 
 
+# Páginas que existem só para quem NÃO está logado (eproc: controlador externo; PJe: login).
+LOGGED_OUT_PATHS = ("externo_controlador", "login.seam")
+
+
 def classify_session(
-    *, final_url: str, expected_host: str, has_password_field: bool, has_captcha: bool
+    *,
+    final_url: str,
+    expected_host: str,
+    has_password_field: bool,
+    has_captcha: bool,
+    has_logged_in_marker: bool | None = None,
 ) -> SessionState:
-    """Regra conservadora: qualquer sinal de login ou desafio nunca vira sessão válida."""
+    """Regra conservadora: qualquer sinal de login ou desafio nunca vira sessão válida.
+
+    `has_logged_in_marker` (quando a fonte define um marcador) exige prova positiva de
+    sessão: no eproc, a busca rápida ou o link "Encerrar Sessão", que só existem logado.
+    """
     if has_captcha:
         return SessionState.CAPTCHA_REQUIRED
-    host = urlparse(final_url).hostname or ""
+    parsed = urlparse(final_url)
+    host = parsed.hostname or ""
     if host != expected_host or "sso" in host or has_password_field:
+        return SessionState.AUTH_REQUIRED
+    if any(marker in parsed.path for marker in LOGGED_OUT_PATHS):
+        return SessionState.AUTH_REQUIRED
+    if has_logged_in_marker is False:
         return SessionState.AUTH_REQUIRED
     return SessionState.VALID
 
@@ -256,11 +274,17 @@ class BrowserSessionManager:
             with contextlib.suppress(Exception):
                 page.wait_for_load_state("networkidle", timeout=15_000)
         final_url = page.url
+        marker = (
+            page.locator(endpoint.logged_in_selector).count() > 0
+            if endpoint.logged_in_selector
+            else None
+        )
         state = classify_session(
             final_url=final_url,
             expected_host=endpoint.host,
             has_password_field=page.locator(PASSWORD_SELECTOR).count() > 0,
             has_captcha=page.locator(CAPTCHA_SELECTOR).count() > 0,
+            has_logged_in_marker=marker,
         )
         return SessionCheck(endpoint.key, state, urlparse(final_url).hostname or "")
 

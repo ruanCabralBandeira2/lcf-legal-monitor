@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 import tempfile
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +51,36 @@ def movement_from_item(
     )
 
 
+LOOKUP_RETRY = timedelta(hours=24)
+_CNJ_IN_TEXT = re.compile(r"\d{7}-?\d{2}\.?\d{4}\.?\d\.?\d{2}\.?\d{4}|\d{20}")
+
+
+def safe_detail(exc: BaseException) -> str:
+    """Mensagem de erro curta, sem número de processo (vai para log e banco)."""
+    text = f"{type(exc).__name__}: {exc}".replace("\n", " ")
+    return _CNJ_IN_TEXT.sub("<cnj>", text)[:300]
+
+
+def recently_not_found(entry: tuple[str, datetime] | None, now: datetime) -> bool:
+    return entry is not None and entry[0] == "NOT_FOUND" and now - entry[1] < LOOKUP_RETRY
+
+
+def next_candidate(
+    process: MonitoredProcess,
+    lookups: dict[tuple[uuid.UUID, str], tuple[str, datetime]],
+    now: datetime,
+) -> str | None:
+    """Próximo site a procurar: o primeiro provável onde ele ainda não foi dado como ausente."""
+    for key in candidate_keys(process.cnj):
+        if not recently_not_found(lookups.get((process.id, key)), now):
+            return key
+    return None
+
+
+def dump_structure(page: Any, target: Path) -> Path:
+    return EprocConnector.dump_structure(page, target)
+
+
 def connector_for(endpoint: SourceEndpoint) -> PjeConnector | EprocConnector | None:
     """Um "robô" por família de sistema; cada site do catálogo usa o seu."""
     if endpoint.system is SourceSystem.PJE:
@@ -82,8 +113,13 @@ class RunSummary:
     baseline_emails: int = 0
 
     def as_dict(self) -> dict[str, Any]:
+        totals: dict[str, int] = {}
+        for item in self.processes:
+            totals[item.status] = totals.get(item.status, 0) + 1
         return {
             "started_at": self.started_at.isoformat(),
+            "finished_at": datetime.now(UTC).isoformat(),
+            "totals": totals,
             "sessions": self.sessions,
             "processes": [item.as_dict() for item in self.processes],
             "new_movements": sum(item.new_movements for item in self.processes),
@@ -124,6 +160,18 @@ class MonitorService:
         """Rodada completa; com `site`, só aquele site (um robô por site, agendas próprias)."""
         summary = RunSummary(started_at=datetime.now(UTC))
         self._baseline = []
+        now = summary.started_at
+        lookups = self._repo.lookups()
+
+        def should_try(process: MonitoredProcess, key: str) -> bool:
+            if site is not None:
+                # Robô de um site só procura os processos cujo próximo site provável é ele,
+                # para não gastar sessões curtas (PJe) procurando o que está em outro lugar.
+                return next_candidate(process, lookups, now) == key
+            return key in candidate_keys(process.cnj) and not recently_not_found(
+                lookups.get((process.id, key)), now
+            )
+
         pending = {p.id: p for p in self._repo.active_processes()}
         outcomes = {pid: ProcessOutcome(process=p.cnj.masked()) for pid, p in pending.items()}
         touched: set[uuid.UUID] = set()
@@ -142,17 +190,7 @@ class MonitorService:
             group = [
                 p
                 for p in pending.values()
-                if key == p.source_key
-                or (
-                    p.source_key is None
-                    # Robô de um site só descobre os processos cujo site provável é ele,
-                    # para não gastar sessões curtas (PJe) procurando o que está no eproc.
-                    and (
-                        candidate_keys(p.cnj)[0] == key
-                        if site is not None
-                        else endpoint in candidate_sources(p.cnj)
-                    )
-                )
+                if key == p.source_key or (p.source_key is None and should_try(p, key))
             ]
             if not group:
                 continue
@@ -240,32 +278,62 @@ class MonitorService:
                 except AuthenticationRequired:
                     outcome.status = "AUTH_REQUIRED"
                     outcome.detail = "sessão expirou durante a rodada"
+                    self._lookup(process, endpoint, "AUTH_REQUIRED", outcome.detail)
                     self._on_auth_problem(endpoint, SessionState.AUTH_REQUIRED)
                     break
                 except ConnectorError as exc:
                     if exc.code is ErrorCode.SOURCE_UNAVAILABLE:
+                        outcome.status = "NOT_FOUND"
                         outcome.detail = f"{endpoint.key}: não encontrado"
+                        self._lookup(process, endpoint, "NOT_FOUND", None)
                     else:
-                        outcome.status = exc.code.value
-                        outcome.detail = f"{endpoint.key}: {exc}"
+                        self._fail(process, endpoint, outcome, exc.code.value, str(exc), None)
+                    continue
+                except Exception as exc:
+                    # Erro inesperado (navegador, site lento, mudança de tela): registra e segue.
+                    page = context.pages[-1] if context.pages else None
+                    self._fail(process, endpoint, outcome, "ERROR", safe_detail(exc), page)
                     continue
                 try:
                     self._process_autos(context, connector, autos, endpoint, process, outcome)
                     found.add(process.id)
+                    self._lookup(process, endpoint, "FOUND", None)
                 except ConnectorError as exc:
-                    outcome.status = exc.code.value
-                    outcome.detail = f"{endpoint.key}: {exc}"
-                    if exc.code is ErrorCode.PARSE_ERROR:
-                        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-                        path = self._diagnostics / f"estrutura-{endpoint.key}-{stamp}.json"
-                        with contextlib.suppress(Exception):
-                            outcome.detail += (
-                                f" | diagnóstico: {connector.dump_structure(autos, path)}"
-                            )
+                    self._fail(process, endpoint, outcome, exc.code.value, str(exc), autos)
+                except Exception as exc:
+                    self._fail(process, endpoint, outcome, "ERROR", safe_detail(exc), autos)
                 finally:
                     with contextlib.suppress(Exception):
                         autos.close()
         return found
+
+    def _lookup(
+        self, process: MonitoredProcess, endpoint: SourceEndpoint, result: str, detail: str | None
+    ) -> None:
+        try:
+            self._repo.record_lookup(
+                process.id, endpoint.key, result=result, detail=detail, at=datetime.now(UTC)
+            )
+        except Exception:
+            LOGGER.exception("Falha ao registrar a procura do processo no site")
+
+    def _fail(
+        self,
+        process: MonitoredProcess,
+        endpoint: SourceEndpoint,
+        outcome: ProcessOutcome,
+        status: str,
+        detail: str,
+        page: Any,
+    ) -> None:
+        outcome.status = status
+        outcome.detail = f"{endpoint.key}: {detail}"
+        if page is not None:
+            stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+            path = self._diagnostics / f"estrutura-{endpoint.key}-{stamp}.json"
+            with contextlib.suppress(Exception):
+                outcome.detail += f" | diagnóstico: {dump_structure(page, path)}"
+        self._lookup(process, endpoint, "ERROR", outcome.detail[:500])
 
     def _process_autos(
         self,

@@ -36,7 +36,7 @@ from legal_monitor.domain.enums import Sensitivity, SessionState, SourceSystem
 from legal_monitor.domain.models import Movement, ProcessRef
 from legal_monitor.monitoring.auth_alert import AuthAlertService, build_approval_message
 from legal_monitor.monitoring.latest import LatestMovementService
-from legal_monitor.monitoring.monitor import MonitorService
+from legal_monitor.monitoring.monitor import MonitorService, next_candidate
 from legal_monitor.monitoring.monitor_repository import PostgresMonitorRepository
 from legal_monitor.monitoring.repository import PostgresManualActionStore
 from legal_monitor.notifications.base import NotificationAttachment, NotificationMessage
@@ -520,13 +520,26 @@ def sites_report() -> int:
     settings = Settings.from_env()
     repository = PostgresMonitorRepository(settings.database_url)
     statuses = repository.statuses()
+    lookups = repository.lookups()
+    now = datetime.now(UTC)
     report: dict[str, dict[str, Any]] = {}
     for process in repository.active_processes():
-        site = process.source_key or f"a-descobrir:{candidate_keys(process.cnj)[0]}"
-        bucket = report.setdefault(site, {"count": 0, "status": {}, "last_success": None})
+        if process.source_key:
+            site = process.source_key
+        else:
+            upcoming = next_candidate(process, lookups, now)
+            site = f"a-descobrir:{upcoming}" if upcoming else "nao-encontrado-em-nenhum-site"
+        bucket = report.setdefault(
+            site, {"count": 0, "status": {}, "last_success": None, "procura": {}}
+        )
         bucket["count"] += 1
         status, last_success = statuses.get(process.id, ("SEM_ESTADO", None))
         bucket["status"][status] = bucket["status"].get(status, 0) + 1
+        for key in candidate_keys(process.cnj):
+            result = lookups.get((process.id, key))
+            if result is not None and result[0] != "FOUND":
+                label = f"{result[0]}@{key}"
+                bucket["procura"][label] = bucket["procura"].get(label, 0) + 1
         if last_success and (
             bucket["last_success"] is None or last_success > bucket["last_success"]
         ):
@@ -572,7 +585,18 @@ def monitor_run(
         interactive_login=interactive_login,
     )
     summary = service.run(site=site)
-    _emit({"ok": True, "site": site or "todos", **summary.as_dict()})
+    payload = {"ok": True, "site": site or "todos", **summary.as_dict()}
+    # Registro de cada rodada (números mascarados, sem conteúdo) para conferência posterior,
+    # inclusive quando o robô roda pelo agendador sem terminal aberto.
+    log_dir = Path.cwd() / "logs"  # mesma raiz usada por Settings.from_env()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(UTC).astimezone().strftime("%Y%m%d-%H%M%S")
+    log_path = log_dir / f"monitor-{site or 'todos'}-{stamp}.json"
+    log_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    payload["log"] = str(log_path)
+    _emit(payload)
     return 0
 
 

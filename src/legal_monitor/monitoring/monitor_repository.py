@@ -51,6 +51,38 @@ class PostgresMonitorRepository:
             for row in rows
         )
 
+    def lookups(self) -> dict[tuple[uuid.UUID, str], tuple[str, datetime]]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT process_id, source_key, result, checked_at FROM source_lookup"
+            ).fetchall()
+        return {
+            (row["process_id"], row["source_key"]): (row["result"], row["checked_at"])
+            for row in rows
+        }
+
+    def record_lookup(
+        self,
+        process_id: uuid.UUID,
+        source_key: str,
+        *,
+        result: str,
+        detail: str | None,
+        at: datetime,
+    ) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO source_lookup (process_id, source_key, result, detail, checked_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (process_id, source_key) DO UPDATE
+                   SET result = EXCLUDED.result,
+                       detail = EXCLUDED.detail,
+                       checked_at = EXCLUDED.checked_at
+                """,
+                (process_id, source_key, result, detail, at),
+            )
+
     def statuses(self) -> dict[uuid.UUID, tuple[str, datetime | None]]:
         with self._connect() as connection:
             rows = connection.execute(

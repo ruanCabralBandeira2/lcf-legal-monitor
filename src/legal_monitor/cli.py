@@ -600,6 +600,9 @@ def structure_diagnostic(number: str, site: str) -> int:
 
 
 TJRJ_PUBLIC_SEARCH_URL = "https://www.tjrj.jus.br/processos"
+TJRJ_PUBLIC_RESULT_URL = (
+    "https://www3.tjrj.jus.br/consultaprocessual/#/consultapublica?numProcessoCNJ={number}"
+)
 _CAPTCHA_ANY = (
     "iframe[src*='recaptcha'], iframe[src*='hcaptcha'], iframe[src*='turnstile'], "
     ".g-recaptcha, .h-captcha, [class*='captcha' i], [id*='captcha' i], img[src*='captcha' i]"
@@ -608,6 +611,19 @@ _CAPTCHA_ANY = (
 
 def _masked(value: str | None, limit: int = 120) -> str:
     return re.sub(r"\d{3,}", "N", " ".join((value or "").split()))[:limit]
+
+
+def _route(url: str) -> str:
+    """Endereço sem query e com números mascarados (para trilhas de diagnóstico)."""
+    parsed = urlparse(url)
+    return f"{parsed.hostname or ''}{parsed.path}#{_masked(parsed.fragment.split('?')[0], 50)}"
+
+
+def _page_text(page: Any) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=5_000)
+    except Exception:
+        return ""
 
 
 def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
@@ -628,21 +644,20 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
         try:
             context = browser.new_context(locale="pt-BR")
             page = context.new_page()
-            page.goto(TJRJ_PUBLIC_SEARCH_URL, wait_until="domcontentloaded")
-            with contextlib.suppress(Exception):
-                page.wait_for_load_state("networkidle", timeout=20_000)
-            page.fill("#parte1ProcCNJ", formatted[:20])
-            page.fill("#parte2ProcCNJ", formatted[21:])
-            # O botão visível é só um ícone (lupa); outro "Pesquisar" com texto fica oculto.
-            try:
-                page.locator("[id='form:commandButton3']").first.click(timeout=10_000)
-            except Exception:
-                page.press("#parte2ProcCNJ", "Enter")
-            page.wait_for_timeout(8_000)
+            # Mesmo endereço que o formulário público gera (1º teste: o "8.19" já é fixo no
+            # formulário e foi duplicado). Número completo e correto direto na URL.
+            page.goto(
+                TJRJ_PUBLIC_RESULT_URL.format(number=formatted), wait_until="domcontentloaded"
+            )
             result_page = context.pages[-1]
+            for _ in range(25):  # o aplicativo desenha o resultado depois de carregar
+                result_page.wait_for_timeout(1_000)
+                if result_page.locator(
+                    "table tr, mat-row, [class*='moviment' i], [id*='moviment' i]"
+                ).count():
+                    break
             with contextlib.suppress(Exception):
-                result_page.wait_for_load_state("networkidle", timeout=25_000)
-            result_page.wait_for_timeout(3_000)
+                result_page.wait_for_load_state("networkidle", timeout=15_000)
             path = out_dir / f"estrutura-tjrj-publica-{stamp}.json"
             EprocConnector.dump_structure(result_page, path)
             final = urlparse(result_page.url)
@@ -656,6 +671,13 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
                 "elementos_movimento": result_page.locator(
                     "[class*='moviment' i], [id*='moviment' i]"
                 ).count(),
+                "linhas_de_lista": result_page.locator(
+                    "mat-row, .mat-row, .mat-mdc-row, li.list-group-item, .card"
+                ).count(),
+                # Só a presença da mensagem; o texto da página não sai do computador.
+                "aviso_nao_encontrado": bool(
+                    re.search(r"n[aã]o (?:foi )?encontrad", _page_text(result_page), re.IGNORECASE)
+                ),
                 "estrutura": str(path),
             }
         finally:
@@ -665,6 +687,15 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
             browser = playwright.chromium.launch(headless=False, **channel)
             try:
                 context = browser.new_context(locale="pt-BR")
+                trail: list[str] = []
+
+                def track(tab: Any) -> None:
+                    tab.on(
+                        "framenavigated",
+                        lambda frame: frame == tab.main_frame and trail.append(_route(frame.url)),
+                    )
+
+                context.on("page", lambda tab: (trail.append("[nova aba]"), track(tab)))
                 page = context.new_page()
                 page.goto(endpoint.base_url, wait_until="domcontentloaded")
                 page.wait_for_selector(endpoint.certificate_login_selector or "img", timeout=20_000)
@@ -679,7 +710,12 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
                     page.wait_for_timeout(1_000)
                 with contextlib.suppress(Exception):
                     page.wait_for_load_state("networkidle", timeout=25_000)
-                page.wait_for_timeout(3_000)
+                page.wait_for_timeout(5_000)
+                tabs = [_route(tab.url) for tab in context.pages]
+                # Se o Portal abriu em outra aba, mapeia essa aba.
+                page = next(
+                    (tab for tab in context.pages if "portalservicos" in tab.url), context.pages[-1]
+                )
                 landed = urlparse(page.url)
                 menu = []
                 for item in page.locator(
@@ -709,7 +745,9 @@ def tjrj_diagnostic(number: str, skip_portal: bool) -> int:
                     "logado": "portalservicos" in page.url,
                     "destino": f"{landed.hostname}{landed.path}#{_masked(landed.fragment, 60)}",
                     "titulo": _masked(page.title(), 60),
-                    "menu": menu[:80],
+                    "trilha": trail[:60],
+                    "abas": tabs,
+                    "menu": menu[:40],
                     "campos": fields,
                     "estrutura": str(path),
                 }

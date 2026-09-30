@@ -10,7 +10,7 @@ Carteira exportada do Astrea em `storage/carteira/` (fora do Git): 119 linhas, 1
 |---|---:|---|---|---|---|
 | `eproc-jfrj-1g` (Justiça Federal RJ) | 61 | OAB + senha + 2FA | a medir | de hora em hora | eproc (validar 1º uso) |
 | `eproc-tjrj-1g` | 44 → 0 (não estão no eproc) | token (SSO Jus.br) | ~10 h | de hora em hora | eproc (validado) |
-| `tjrj-portal` (processo eletrônico legado do TJRJ) | 44 (numeração antiga) | token (imagem do certificado no IdServerJus) ou usuário/senha | a medir | a definir | em construção |
+| `tjrj-portal` (processo eletrônico legado do TJRJ) | 44 (numeração antiga) | token (imagem do certificado no IdServerJus) ou usuário/senha | não persiste (login a cada rodada) | janelas com PIN (como o PJe) | em construção: consulta em iframe (`#/consproc/consultaportal`) |
 | `pje-tjrj-1g` | 5 | token + PIN | ~15 min | 06:00 e 18:00 | PJe (validado) |
 | `pje-trt1-1g` (Trabalho) | 5 | login próprio | a medir | 06:20 e 18:20 | PJe (validar) |
 | `eproc-tjrj-2g` | 1 | token (SSO Jus.br) | ~10 h | de hora em hora | eproc |

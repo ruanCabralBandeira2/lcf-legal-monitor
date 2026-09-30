@@ -1,6 +1,15 @@
 # Contexto atual do projeto
 
-Atualizado em 28/09/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
+Atualizado em 30/09/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
+
+## ▶ Retomada (30/09/2026): o projeto está mudando do Windows para o Mac mini
+
+- **Comece por `docs/runbooks/MIGRACAO_MAC.md`**: o que copiar (fora do Git: `.env`, `storage/carteira/astrea-2026-09-28.txt`, `storage/backups/legal_monitor-2026-09-30.dump`), como montar o Mac, logins e a lista de pendências em ordem.
+- **Branch de trabalho:** `claude/m4-rota-email-sessao` (33+ commits sobre `main`; push feito pelo operador antes da troca). Versão 0.7.0; 123 testes aprovados no Windows.
+- **Funcionando e validado com processos reais:** e-mail (SMTP + senha de app no cofre do sistema); login com token/2FA humano (`auth-open`) no eproc TJRJ, eproc TRF2, PJe TJRJ, PJe TRT1 e Portal de Serviços do TJRJ; robô eproc (TRF2) e robô PJe TJRJ (3 de 5 processos com histórico); carteira de 118 processos importada e separada por site; robôs agendados por site; aviso de login necessário; aviso de banco fora do ar.
+- **Próximo passo imediato:** gravação guiada do Portal de Serviços (`legal-monitor diagnostico-tjrj <CNJ>`) para construir o conector dos 44 processos de numeração antiga do TJRJ (a consulta roda dentro de um iframe em `portalservicos/#/consproc/consultaportal`).
+- **Perguntas em aberto para o operador:** qual o último evento do processo do TRF2 (o robô vê 50, até 08/07/2020); JFRJ (login com 2FA do titular); TRF4 (credenciamento do titular).
+- **Incidente 28-30/09:** Docker Desktop não voltou após reiniciar o Windows; todas as rodadas falharam por 2 dias (`connection timeout`). Corrigido com aviso por e-mail (máx. 1 a cada 6 h). No Mac: Docker Desktop iniciando com o login.
 
 ## Missão
 

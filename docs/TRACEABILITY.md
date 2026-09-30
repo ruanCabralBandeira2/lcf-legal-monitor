@@ -40,3 +40,6 @@
 | Paginação de eventos do eproc e download por endereço | `EprocConnector.read_timeline` (todas as páginas), `TimelineDocument.href`, `tests/test_eproc.py` (duas páginas simuladas no Edge) | corrigido após 1º ciclo real no TRF2 (28/09/2026) |
 | Trava contra enxurrada de novidades | `MAX_INDIVIDUAL_ALERTS`, `_send_burst_summary` | implementado |
 | Recusa de login explicada | `LOGIN_REFUSED`, `SessionCheck.detail` | implementado (caso TRF4 "Invalid user") |
+| Aviso de banco fora do ar | `alert_database_down` em `legal_monitor.cli`, `tests/test_cli_database_alert.py` | implementado após 2 dias de rodadas falhando em silêncio (28-30/09/2026) |
+| Diagnóstico guiado do TJRJ legado | `diagnostico-tjrj` (consulta pública opcional; Portal com gravação guiada de rotas, endereços internos e iframe) | pronto; gravação guiada pendente no Mac |
+| Migração para o Mac mini | `docs/runbooks/MIGRACAO_MAC.md`, backup `storage/backups/` (fora do Git) | preparado em 30/09/2026 |

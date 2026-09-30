@@ -10,11 +10,13 @@ import re
 import sys
 import tempfile
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from psycopg import OperationalError as DatabaseUnavailable
 
 from legal_monitor import __version__
 from legal_monitor.admin.portfolio import parse_portfolio
@@ -1008,6 +1010,40 @@ def tjrj_diagnostic(
     return 0
 
 
+DATABASE_ALERT_INTERVAL = timedelta(hours=6)
+
+
+def alert_database_down(marker: Path, notifier: Any, now: datetime) -> bool:
+    """Avisa o operador que o banco caiu, no máximo uma vez a cada 6 h (marcador em arquivo,
+    porque o próprio banco está fora do ar)."""
+    if marker.exists():
+        last = datetime.fromtimestamp(marker.stat().st_mtime, tz=UTC)
+        if now - last < DATABASE_ALERT_INTERVAL:
+            return False
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(now.isoformat(), encoding="utf-8")
+    if notifier is None:
+        return False
+    try:
+        notifier.send(
+            NotificationMessage(
+                title="[LCF Monitor] Banco do robô fora do ar: verificações paradas",
+                body=(
+                    "O robô não conseguiu acessar o banco de dados e nenhuma verificação de "
+                    "processo está sendo feita.\n\nCausa mais provável: o Docker Desktop está "
+                    "fechado (ex.: depois de reiniciar o computador). Abra o Docker Desktop; o "
+                    "banco volta sozinho e as rodadas seguintes retomam.\n\nEste aviso se "
+                    "repete no máximo a cada 6 horas enquanto o problema continuar."
+                ),
+                correlation_id=f"db-down-{now:%Y%m%dT%H%M}",
+                demo_only=False,
+            )
+        )
+    except EmailNotificationError:
+        return False
+    return True
+
+
 def monitor_run(
     site: str | None = None, notify_initial: bool = False, interactive_login: bool = True
 ) -> int:
@@ -1041,7 +1077,23 @@ def monitor_run(
         notify_initial=notify_initial,
         interactive_login=interactive_login,
     )
-    summary = service.run(site=site)
+    marker = settings.temp_dir / "alerta-banco-fora.txt"
+    try:
+        summary = service.run(site=site)
+    except DatabaseUnavailable as exc:
+        # 28-30/09/2026: Docker parado e rodadas falhando em silêncio por dois dias.
+        alerted = alert_database_down(marker, operator, datetime.now(UTC))
+        _emit(
+            {
+                "ok": False,
+                "site": site or "todos",
+                "error": "banco do robô indisponível (Docker Desktop parado?)",
+                "error_type": type(exc).__name__,
+                "operador_avisado": alerted,
+            }
+        )
+        return 3
+    marker.unlink(missing_ok=True)  # banco voltou: um novo problema volta a avisar
     payload = {"ok": True, "site": site or "todos", **summary.as_dict()}
     # Registro de cada rodada (números mascarados, sem conteúdo) para conferência posterior,
     # inclusive quando o robô roda pelo agendador sem terminal aberto.

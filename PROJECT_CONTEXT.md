@@ -7,7 +7,8 @@ Atualizado em 30/09/2026 (noite, Mac mini). Este arquivo é o ponto de retomada 
 - **Chrome do robô sempre aberto** (`chrome-robo`, página "NÃO FECHE"): os robôs se conectam a ele em 127.0.0.1:9222. O PIN do token é digitado uma vez após ligar o Mac (aviso por e-mail; `chrome-robo-desbloquear`).
 - **Certificado escolhido sozinho:** política do Chrome `AutoSelectCertificateForUrls` (`ops/macos/certificado-automatico.sh ativar|desativar|status`), só `tjrj.jus.br`, `jfrj.jus.br`, `trf2.jus.br` e emissor AC OAB G3.
 - **Portal:** perfil "Advogado" escolhido sozinho; validado sem PIN e sem clique.
-- **Pendências do operador (uma vez):** PJeOffice → "Apenas no primeiro acesso (com confirmação)"; `auth-open eproc-jfrj-1g` e `auth-open eproc-trf2` marcando "Não usar o 2FA neste dispositivo e navegador".
+- **Validado em 01/10/2026 (madrugada), sem intervenção:** Portal (44), PJe TJRJ (3), TRF2 (login novo sem 2FA, cookie `EPROC_A` no perfil normal) e eproc TJRJ (certificado direto ao painel). PJeOffice em "Solicitar senha uma vez (no login)" e certificado memorizado; SafeSign com "Timeout do PIN" desabilitado; tela do Mac sem bloqueio.
+- **Pendentes:** JFRJ (titular ainda sem 2FA; pausado), TRF4 (sem cadastro; pausado), TRT1 (leitor do PJe-KZ), agravo de 2º grau no Portal (pesquisa de 2ª instância), 2 processos PJe em que o advogado não é parte (ignorar/desativar).
 - **Robustez:** salvar só cookies no modo CDP; tempo máximo de 90 min por rodada; sequência de login com um processo por site.
 
 ## Retomada (30/09/2026, noite): operação migrada para o Mac mini

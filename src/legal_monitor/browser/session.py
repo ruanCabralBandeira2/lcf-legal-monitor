@@ -285,6 +285,9 @@ class BrowserSessionManager:
             raise BrowserUnavailableError(
                 "Chrome do robô não está aberto (ops/launchd/registrar-robos.sh)"
             ) from exc
+        if endpoint.persistent_profile and browser.contexts:
+            yield from self._profile_context(browser.contexts[0], endpoint, minimize)
+            return
         context = browser.new_context(**options)
         context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
         allow_local_apps(context, endpoint)
@@ -297,6 +300,34 @@ class BrowserSessionManager:
                 self._save_state(context, state_path, cookies_only=True)
                 with contextlib.suppress(PlaywrightError):
                     context.close()
+
+    @staticmethod
+    def _profile_context(
+        context: BrowserContext, endpoint: SourceEndpoint, minimize: bool
+    ) -> Iterator[BrowserContext]:
+        """Perfil normal do Chrome do robô (cookies permanentes, janela não anônima). Nada é
+        salvo nem fechado além das abas abertas nesta rodada; a fila garante que são nossas."""
+        created: list[Any] = []
+
+        def remember(page: Any) -> None:
+            created.append(page)
+
+        context.on("page", remember)
+        if minimize:
+            context.on("page", minimize_window)
+        allow_local_apps(context, endpoint)
+        context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
+        try:
+            yield context
+        finally:
+            with contextlib.suppress(Exception):
+                context.remove_listener("page", remember)
+                if minimize:
+                    context.remove_listener("page", minimize_window)
+            for page in created:
+                with contextlib.suppress(Exception):
+                    if not page.is_closed():
+                        page.close()
 
     def login(
         self,
@@ -324,7 +355,9 @@ class BrowserSessionManager:
                 with contextlib.suppress(PlaywrightError):
                     context.clear_cookies(name=name)
             self._trace(context, endpoint)
-            page = context.pages[0] if context.pages else context.new_page()
+            # Sempre uma aba nova: no perfil normal do Chrome do robô já existem outras abas
+            # (a "NÃO FECHE"), que nunca devem ser navegadas pelo robô.
+            page = context.new_page()
             page.goto(endpoint.base_url, wait_until="domcontentloaded")
             if click_certificate and endpoint.certificate_login_selector:
                 with contextlib.suppress(Exception):
@@ -411,7 +444,8 @@ class BrowserSessionManager:
             attach(existing)
 
     def check(self, endpoint: SourceEndpoint) -> SessionCheck:
-        if not self.has_saved_state(endpoint):
+        uses_profile = bool(self._cdp_url) and endpoint.persistent_profile
+        if not uses_profile and not self.has_saved_state(endpoint):
             return SessionCheck(endpoint.key, SessionState.AUTH_REQUIRED, "")
         headless = self.headless_for(endpoint)
         if headless and endpoint.headless_blocked:

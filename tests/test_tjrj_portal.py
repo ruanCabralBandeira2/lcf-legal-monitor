@@ -431,3 +431,12 @@ class LocalAppsPermissionTests(unittest.TestCase):
             other = Context()
             allow_local_apps(other, CATALOG[key])
             self.assertEqual(other.granted, [], key)
+
+
+class PersistentProfileTests(unittest.TestCase):
+    def test_eproc_uses_normal_profile_others_isolated(self) -> None:
+        # eproc ignora "Não usar o 2FA neste dispositivo" em janela anônima (manual oficial).
+        for key in ("eproc-trf2", "eproc-jfrj-1g", "eproc-tjrj-1g"):
+            self.assertTrue(CATALOG[key].persistent_profile, key)
+        for key in ("tjrj-portal", "pje-tjrj-1g"):
+            self.assertFalse(CATALOG[key].persistent_profile, key)

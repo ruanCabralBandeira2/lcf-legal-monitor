@@ -62,3 +62,4 @@
 | Fila de um robô por vez no Chrome do robô | `_exclusive_lock` em `legal_monitor.browser.session` (`CDP_QUEUE_SECONDS`) | após travas com dois clientes CDP simultâneos (01/10/2026) |
 | Pausar sites | `PAUSED_SITES` no `.env` (`monitor-run` sai sem janela nem aviso; `sites-report` marca `pausado`) | JFRJ e TRF4 pausados em 01/10/2026 |
 | PJe sem "acessar apps deste dispositivo" | `allow_local_apps` (permissão `local-network-access` só para `PJE_LOCAL_APP_ORIGINS`) | o Chrome perguntava em toda rodada (contexto limpo); relato do operador em 01/10/2026 |
+| eproc no perfil normal do Chrome do robô | `SourceEndpoint.persistent_profile`, `_profile_context` | "dispositivo confiável" do 2FA não vale em janela anônima (manual oficial); 01/10/2026 |

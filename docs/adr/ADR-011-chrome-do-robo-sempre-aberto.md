@@ -25,6 +25,7 @@ Guardar ou digitar o PIN por software foi descartado: não é oficial e o macOS 
 - Cada rodada tem tempo máximo de 90 min; na sequência de login cada site roda em processo separado, para um site travado não bloquear os outros.
 - **Fila: um robô por vez no Chrome do robô** (`chrome-robo-uso.lock`, espera até 50 min). Com dois clientes conectados ao mesmo Chrome, cada janela nova espera que todos a liberem; um robô ocupado fora do navegador congelava as janelas do outro (TRF2/TRF4 e PJe em 01/10/2026).
 - Sites pausados pelo operador (`PAUSED_SITES`): JFRJ (sem o 2FA configurado) e TRF4 (sem cadastro do titular).
+- **eproc usa o perfil normal (não anônimo) do Chrome do robô** (`persistent_profile`): o manual oficial do 2FA avisa que "Não usar o 2FA neste dispositivo e navegador" não vale em janela anônima, e o contexto isolado do robô era tratado assim (o TRF2 pediu o 2FA de novo em 01/10/2026). O robô só abre e fecha as próprias abas; a página "NÃO FECHE" nunca é navegada.
 - PJe: cada contexto recebe a permissão `local-network-access` só para os endereços oficiais do PJe (SSO, TJRJ, TRT1), para a página falar com o PJeOffice no Mac sem o Chrome perguntar "acessar apps deste dispositivo" em toda rodada.
 
 ## Consequências

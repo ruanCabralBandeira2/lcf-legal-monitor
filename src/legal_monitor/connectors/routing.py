@@ -33,6 +33,9 @@ class SourceEndpoint:
     logged_in_selector: str | None = None
     # Botão de login por certificado sem texto (ex.: imagem no IdServerJus do TJRJ).
     certificate_login_selector: str | None = None
+    # Usar o perfil normal (não anônimo) do Chrome do robô. O eproc ignora "Não usar o 2FA
+    # neste dispositivo e navegador" em janela anônima (manual oficial do 2FA; 01/10/2026).
+    persistent_profile: bool = False
 
     def __post_init__(self) -> None:
         parsed = urlparse(self.base_url)
@@ -41,6 +44,8 @@ class SourceEndpoint:
         if self.system is SourceSystem.EPROC and self.logged_in_selector is None:
             # Todo eproc logado tem a busca rápida e o link de encerrar sessão.
             object.__setattr__(self, "logged_in_selector", EPROC_LOGGED_IN_SELECTOR)
+        if self.system is SourceSystem.EPROC:
+            object.__setattr__(self, "persistent_profile", True)
 
     @property
     def host(self) -> str:

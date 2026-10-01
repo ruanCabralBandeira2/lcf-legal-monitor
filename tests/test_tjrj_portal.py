@@ -440,3 +440,38 @@ class PersistentProfileTests(unittest.TestCase):
             self.assertTrue(CATALOG[key].persistent_profile, key)
         for key in ("tjrj-portal", "pje-tjrj-1g"):
             self.assertFalse(CATALOG[key].persistent_profile, key)
+
+
+# Cópia da estrutura real do aviso de inatividade do Portal (falha de 01/10/2026, 01:31).
+_IDLE_PAGE = """<html><body class="modal-open">
+<div id="modal-fale-conosco" class="modal fade"><div class="modal-footer">
+  <div class="rodape-confirma" onclick="document.body.dataset.ok='errado'">Enviar</div></div></div>
+<app-modal-user-idle-timeout><div id="modalUserIdleTimeout" class="modal fade show" role="dialog"
+  style="display:block"><div class="modal-dialog"><div class="modal-content">
+  <div class="modal-header"><h4 class="modal-title cabecalho-modal">Atenção</h4></div>
+  <div class="modal-body tamanho-lista">Você está inativo. Deseja continuar?</div>
+  <div class="modal-footer"><a role="button" style="display:contents">
+    <div class="rodape-confirma" onclick="document.body.dataset.ok='continuou'">Sim</div></a>
+    <div class="rodape-cancela">Não</div></div>
+</div></div></div></app-modal-user-idle-timeout>
+<div class="modal-backdrop fade show"></div></body></html>"""
+
+
+@unittest.skipUnless(Path(CHROME).exists(), "Google Chrome ausente")
+class PortalIdleModalBrowserTests(unittest.TestCase):
+    def test_confirms_idle_timeout_modal_without_word_session(self) -> None:
+        def run() -> object:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(_IDLE_PAGE)
+                    self.assertTrue(keep_session(page))
+                    return page.evaluate("document.body.dataset.ok")
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual(pool.submit(run).result(timeout=120), "continuou")

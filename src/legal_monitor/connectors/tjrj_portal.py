@@ -82,13 +82,34 @@ def _answer_browser_dialog(dialog: Any) -> None:
             dialog.dismiss()
 
 
+# Aviso de inatividade do Portal (estrutura gravada na falha de 01/10/2026, 01:31): o
+# componente app-modal-user-idle-timeout abre #modalUserIdleTimeout sobre a página; o botão
+# verde (.rodape-confirma) mantém a sessão. Sem o clique, todas as pesquisas seguintes falham.
+_IDLE_MODAL = "app-modal-user-idle-timeout .modal.show, #modalUserIdleTimeout.show"
+
+
+def _confirm_idle_modal(page: Page) -> bool:
+    modal = page.locator(_IDLE_MODAL)
+    if not modal.count():
+        return False
+    button = modal.first.locator(".rodape-confirma").filter(visible=True)
+    if not button.count():
+        return False
+    button.first.click(timeout=5_000)
+    page.wait_for_timeout(1_000)
+    return True
+
+
 def keep_session(page: Page | None) -> bool:
-    """Clica "Sim" no aviso de prolongar a sessão, na página ou em qualquer quadro."""
+    """Mantém a sessão: confirma o aviso de inatividade do Portal ou clica "Sim" no aviso de
+    prolongar a sessão, na página ou em qualquer quadro."""
     if page is None:
         return False
     with contextlib.suppress(Exception):
         if page.is_closed():
             return False
+        if _confirm_idle_modal(page):
+            return True
         for target in [page.main_frame, *page.frames]:
             with contextlib.suppress(Exception):
                 modals = target.locator(_MODALS)
@@ -300,6 +321,12 @@ class TjrjPortalConnector:
                 with contextlib.suppress(Exception):
                     portal.add_locator_handler(
                         portal.locator(_MODALS).filter(has_text=SESSION_PROMPT),
+                        lambda _modal, tab=portal: keep_session(tab),
+                        no_wait_after=True,
+                    )
+                with contextlib.suppress(Exception):
+                    portal.add_locator_handler(
+                        portal.locator(_IDLE_MODAL),
                         lambda _modal, tab=portal: keep_session(tab),
                         no_wait_after=True,
                     )

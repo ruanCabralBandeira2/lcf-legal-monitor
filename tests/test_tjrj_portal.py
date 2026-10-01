@@ -408,3 +408,26 @@ class PortalTrocarPerfilBrowserTests(unittest.TestCase):
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             self.assertEqual(pool.submit(run).result(timeout=120), "Advogado")
+
+
+class LocalAppsPermissionTests(unittest.TestCase):
+    def test_only_pje_sites_may_talk_to_pjeoffice(self) -> None:
+        from legal_monitor.browser.session import PJE_LOCAL_APP_ORIGINS, allow_local_apps
+
+        class Context:
+            def __init__(self) -> None:
+                self.granted: list[tuple[str, str]] = []
+
+            def grant_permissions(self, permissions: list[str], origin: str) -> None:
+                self.granted += [(permission, origin) for permission in permissions]
+
+        pje = Context()
+        allow_local_apps(pje, CATALOG["pje-tjrj-1g"])
+        origins = {origin for _, origin in pje.granted}
+        self.assertEqual({permission for permission, _ in pje.granted}, {"local-network-access"})
+        self.assertTrue(set(PJE_LOCAL_APP_ORIGINS) <= origins)
+        self.assertTrue(all(origin.endswith(".jus.br") for origin in origins))
+        for key in ("tjrj-portal", "eproc-trf2", "eproc-tjrj-1g"):
+            other = Context()
+            allow_local_apps(other, CATALOG[key])
+            self.assertEqual(other.granted, [], key)

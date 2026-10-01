@@ -66,6 +66,25 @@ def _login_refusal(page: Page) -> str:
 
 CDP_QUEUE_SECONDS = 50 * 60
 
+# Sites do PJe que conversam com o PJeOffice no próprio Mac (localhost). Sem a permissão
+# "acessar apps deste dispositivo", o Chrome pergunta em toda rodada, porque cada rodada usa
+# um contexto limpo (relato do operador, 01/10/2026). Só estes endereços recebem a permissão.
+PJE_LOCAL_APP_ORIGINS = (
+    "https://sso.cloud.pje.jus.br",
+    "https://tjrj.pje.jus.br",
+    "https://pje.trt1.jus.br",
+)
+
+
+def allow_local_apps(context: Any, endpoint: SourceEndpoint) -> None:
+    """Libera o PJeOffice (localhost) só para os sites oficiais do PJe."""
+    if endpoint.system.value != "PJE":
+        return
+    origins = {*PJE_LOCAL_APP_ORIGINS, f"https://{endpoint.host}"}
+    for origin in sorted(origins):
+        with contextlib.suppress(Exception):
+            context.grant_permissions(["local-network-access"], origin=origin)
+
 
 @contextlib.contextmanager
 def _exclusive_lock(path: Path, wait_seconds: float, poll_seconds: float = 2.0) -> Iterator[None]:
@@ -225,6 +244,7 @@ class BrowserSessionManager:
                         options,
                         state_path,
                         self._minimize if minimize is None else minimize,
+                        endpoint,
                     )
                 return
             launch: dict[str, Any] = {"headless": self._headless if headless is None else headless}
@@ -234,6 +254,7 @@ class BrowserSessionManager:
             try:
                 context = browser.new_context(**options)
                 context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
+                allow_local_apps(context, endpoint)
                 try:
                     yield context
                 finally:
@@ -249,7 +270,12 @@ class BrowserSessionManager:
                         browser.close()
 
     def _cdp_context(
-        self, playwright: Any, options: dict[str, Any], state_path: Path, minimize: bool
+        self,
+        playwright: Any,
+        options: dict[str, Any],
+        state_path: Path,
+        minimize: bool,
+        endpoint: SourceEndpoint,
     ) -> Iterator[BrowserContext]:
         """Contexto isolado (cookies próprios) dentro do Chrome do robô já aberto. Só o
         contexto é fechado no fim: o Chrome continua aberto com o token desbloqueado."""
@@ -261,6 +287,7 @@ class BrowserSessionManager:
             ) from exc
         context = browser.new_context(**options)
         context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
+        allow_local_apps(context, endpoint)
         if minimize:
             context.on("page", minimize_window)
         try:

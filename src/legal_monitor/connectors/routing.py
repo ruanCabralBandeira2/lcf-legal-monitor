@@ -111,7 +111,13 @@ CATALOG: dict[str, SourceEndpoint] = {
             system=SourceSystem.EPROC,
             base_url="https://eproc.jfrj.jus.br/eproc/",
             auth_realm="jfrj",
-            notes="eproc Justiça Federal do RJ 1º grau (TRF2); login OAB + senha + 2FA",
+            notes=(
+                "eproc Justiça Federal do RJ 1º grau (TRF2); login OAB + senha + 2FA ou "
+                "certificado digital (botão conferido em 30/09/2026)"
+            ),
+            certificate_login_label="Certificado Digital",
+            # O texto também aparece em links ocultos (um leva à Certisign): usar o botão.
+            certificate_login_selector="input[onclick*='SubmitCert']",
         ),
         SourceEndpoint(
             key="eproc-trf2",
@@ -119,7 +125,13 @@ CATALOG: dict[str, SourceEndpoint] = {
             system=SourceSystem.EPROC,
             base_url="https://eproc.trf2.jus.br/eproc/",
             auth_realm="trf2",
-            notes="eproc TRF2 2º grau; login OAB (RJ000000) + senha + 2FA próprio",
+            notes=(
+                "eproc TRF2 2º grau; login OAB (RJ000000) + senha + 2FA próprio ou "
+                "certificado digital (botão conferido em 30/09/2026)"
+            ),
+            certificate_login_label="Certificado Digital",
+            # O texto também aparece em links ocultos (um leva à Certisign): usar o botão.
+            certificate_login_selector="input[onclick*='SubmitCert']",
         ),
         SourceEndpoint(
             key="eproc-trf4-2g",

@@ -559,7 +559,9 @@ def sites_report() -> int:
     return 0
 
 
-def admin_reset_history(number: str, actor: str) -> int:
+def admin_reset_history(
+    number: str, actor: str, latest: int | None = None, with_document: bool = False
+) -> int:
     settings = Settings.from_env()
     cnj = CnjNumber.parse(number)
     repository = PostgresMonitorRepository(settings.database_url)
@@ -567,7 +569,16 @@ def admin_reset_history(number: str, actor: str) -> int:
     if process_id is None:
         _emit({"ok": False, "error": "Processo não cadastrado"})
         return 1
-    removed = repository.reset_history(process_id, actor_id=actor, at=datetime.now(UTC))
+    if latest:
+        removed = repository.forget_latest(
+            process_id,
+            count=latest,
+            with_document_only=with_document,
+            actor_id=actor,
+            at=datetime.now(UTC),
+        )
+    else:
+        removed = repository.reset_history(process_id, actor_id=actor, at=datetime.now(UTC))
     _emit({"ok": True, "process": cnj.masked(), "removed": removed})
     return 0
 
@@ -1117,6 +1128,7 @@ def monitor_run(
     notify_initial: bool = False,
     interactive_login: bool = True,
     max_processes: int | None = None,
+    only_process: str | None = None,
 ) -> int:
     """Rodada completa: login por fonte, leitura, dedupe, download e e-mail (ADR-009)."""
     settings = Settings.from_env()
@@ -1124,7 +1136,9 @@ def monitor_run(
         if not acquired:
             _emit({"ok": True, "site": site or "todos", "skipped": "rodada já em andamento"})
             return 0
-        return _monitor_run_locked(settings, site, notify_initial, interactive_login, max_processes)
+        return _monitor_run_locked(
+            settings, site, notify_initial, interactive_login, max_processes, only_process
+        )
 
 
 def _monitor_run_locked(
@@ -1133,6 +1147,7 @@ def _monitor_run_locked(
     notify_initial: bool,
     interactive_login: bool,
     max_processes: int | None,
+    only_process: str | None = None,
 ) -> int:
     alerts = _auth_alert_service(settings)
     operator = _operator_notifier(settings)
@@ -1164,7 +1179,11 @@ def _monitor_run_locked(
     )
     marker = settings.temp_dir / "alerta-banco-fora.txt"
     try:
-        summary = service.run(site=site, max_processes=max_processes)
+        summary = service.run(
+            site=site,
+            max_processes=max_processes,
+            only_digits=CnjNumber.parse(only_process).digits if only_process else None,
+        )
     except DatabaseUnavailable as exc:
         # 28-30/09/2026: Docker parado e rodadas falhando em silêncio por dois dias.
         alerted = alert_database_down(marker, operator, datetime.now(UTC))
@@ -1467,6 +1486,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="não abre janela de login: sessão caída só gera aviso (robôs de hora em hora)",
     )
     monitor_parser.add_argument(
+        "--processo", default=None, help="rodada normal restrita a um processo (teste de rotina)"
+    )
+    monitor_parser.add_argument(
         "--max-processos",
         type=int,
         default=None,
@@ -1486,6 +1508,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reset_parser.add_argument("number")
     reset_parser.add_argument("--actor", default="local-admin")
+    reset_parser.add_argument(
+        "--ultimas",
+        type=int,
+        default=None,
+        help="teste de rotina: esquece só as N movimentações mais recentes (viram novidade)",
+    )
+    reset_parser.add_argument(
+        "--com-peca",
+        action="store_true",
+        help="com --ultimas: só movimentações com peça (Ato Assinado / Ver Íntegra)",
+    )
     diagnostic_parser = subcommands.add_parser(
         "diagnostico-estrutura",
         help="gera o mapa da página do processo só com estrutura (sem conteúdo)",
@@ -1569,14 +1602,18 @@ def main(argv: list[str] | None = None) -> int:
             return session_watch(args.source, args.every, args.max_hours, args.notify)
         if args.command == "monitor-run":
             return monitor_run(
-                args.site, args.notify_initial, not args.no_interactive_login, args.max_processos
+                args.site,
+                args.notify_initial,
+                not args.no_interactive_login,
+                args.max_processos,
+                args.processo,
             )
         if args.command == "import-processes":
             return import_processes(args.path, args.lawyer, args.actor, args.dry_run)
         if args.command == "sites-report":
             return sites_report()
         if args.command == "admin-reset-history":
-            return admin_reset_history(args.number, args.actor)
+            return admin_reset_history(args.number, args.actor, args.ultimas, args.com_peca)
         if args.command == "diagnostico-estrutura":
             return structure_diagnostic(args.number, args.site)
         if args.command == "diagnostico-tjrj":

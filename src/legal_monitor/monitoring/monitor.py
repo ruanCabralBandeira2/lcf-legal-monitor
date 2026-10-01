@@ -195,7 +195,13 @@ class MonitorService:
         self._notify_initial = notify_initial
         self._baseline: list[tuple[MonitoredProcess, TimelineItem]] = []
 
-    def run(self, *, site: str | None = None, max_processes: int | None = None) -> RunSummary:
+    def run(
+        self,
+        *,
+        site: str | None = None,
+        max_processes: int | None = None,
+        only_digits: str | None = None,
+    ) -> RunSummary:
         """Rodada completa; com `site`, só aquele site (um robô por site, agendas próprias)."""
         summary = RunSummary(started_at=datetime.now(UTC))
         self._baseline = []
@@ -211,7 +217,11 @@ class MonitorService:
                 lookups.get((process.id, key)), now
             )
 
-        pending = {p.id: p for p in self._repo.active_processes()}
+        pending = {
+            p.id: p
+            for p in self._repo.active_processes()
+            if only_digits is None or p.cnj.digits == only_digits
+        }
         outcomes = {pid: ProcessOutcome(process=p.cnj.masked()) for pid, p in pending.items()}
         touched: set[uuid.UUID] = set()
         # Ordem de fontes: as já conhecidas primeiro; depois descoberta pelo catálogo.

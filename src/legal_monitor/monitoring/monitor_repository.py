@@ -96,6 +96,58 @@ class PostgresMonitorRepository:
             )
         return {"movements": movements, "documents": documents, "lookups": lookups}
 
+    def forget_latest(
+        self,
+        process_id: uuid.UUID,
+        *,
+        count: int,
+        with_document_only: bool,
+        actor_id: str,
+        at: datetime,
+    ) -> dict:
+        """Teste de rotina em ambiente real: esquece só as `count` movimentações mais
+        recentes (opcionalmente só as que têm peça) para a próxima rodada tratá-las como
+        novidade. Auditado; o restante do histórico e as procuras são mantidos."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id FROM movement
+                 WHERE process_id = %s
+                   AND (NOT %s OR description ~* '(Ato Assinado|Ver [IÍ]ntegra)')
+                 ORDER BY event_at DESC NULLS LAST, observed_at DESC
+                 LIMIT %s
+                """,
+                (process_id, with_document_only, count),
+            ).fetchall()
+            ids = [row["id"] for row in rows]
+            documents = connection.execute(
+                "DELETE FROM document WHERE movement_id = ANY(%s)", (ids,)
+            ).rowcount
+            movements = connection.execute(
+                "DELETE FROM movement WHERE id = ANY(%s)", (ids,)
+            ).rowcount
+            connection.execute(
+                """
+                INSERT INTO audit_event
+                    (id, actor_type, actor_id, action, entity_type, entity_id, at,
+                     correlation_id, metadata_json)
+                VALUES (%s, 'ADMIN', %s, 'MONITOR_TEST_FORGET_LATEST', 'legal_process', %s, %s,
+                        %s, jsonb_build_object('movements', %s::int, 'documents', %s::int,
+                                               'with_document_only', %s::boolean))
+                """,
+                (
+                    uuid.uuid4(),
+                    actor_id,
+                    process_id,
+                    at,
+                    uuid.uuid4(),
+                    movements,
+                    documents,
+                    with_document_only,
+                ),
+            )
+        return {"movements": movements, "documents": documents}
+
     def lookups(self) -> dict[tuple[uuid.UUID, str], tuple[str, datetime]]:
         with self._connect() as connection:
             rows = connection.execute(

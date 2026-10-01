@@ -51,3 +51,5 @@
 | Agendamento no Mac | `ops/launchd/registrar-robos.sh` (LaunchAgents + `caffeinate`) | registrado no Mac; agenda simultânea preparada, ativação após teste |
 | Teste de peça sob demanda | `fetch-latest --com-peca --operador` (`LatestMovementService`, Portal e PJe) | e-mail de teste só ao operador, com motivo quando não há PDF |
 | Resumo de e-mail legível | `shorten` em `legal_monitor.monitoring.monitor` | corta no fim da palavra com "…" (160 caracteres) |
+| Teste de rotina em ambiente real | `admin-reset-history --ultimas N --com-peca` (auditado), `monitor-run --processo` | 30/09/2026: movimentação esquecida voltou como novidade, PDF baixado e e-mail enviado; agenda simultânea disparada pelo launchd (Portal 44/44 OK em 18 min) |
+| Login por certificado no JFRJ e TRF2 | `certificate_login_selector` (`SubmitCert`) no catálogo | botão conferido na página pública em 30/09/2026; login real pendente |

@@ -127,6 +127,23 @@ def keep_session(page: Page | None) -> bool:
     return False
 
 
+def watch_session_prompts(page: Page) -> None:
+    """Se um aviso de sessão cobrir a tela antes de um clique do robô, responde antes.
+
+    O Playwright exige que o localizador do vigia aponte para UM elemento: o aviso de
+    inatividade casa com vários seletores de caixa ao mesmo tempo (caixa, .modal-dialog) e,
+    sem o .first, cada clique da rodada falhava por "strict mode violation" (01/10/2026, 13:14).
+    """
+    for overlay in (
+        page.locator(_IDLE_MODAL),
+        page.locator(_MODALS).filter(has_text=SESSION_PROMPT),
+    ):
+        with contextlib.suppress(Exception):
+            page.add_locator_handler(
+                overlay.first, lambda _modal, tab=page: keep_session(tab), no_wait_after=True
+            )
+
+
 # Lê os cartões de movimento: "Tipo do Movimento: X" + pares rótulo/valor (Data..., Descrição...).
 _CARDS_JS = r"""
 () => [...document.querySelectorAll('app-movimento')].map((card, index) => {
@@ -317,19 +334,7 @@ class TjrjPortalConnector:
                 with contextlib.suppress(Exception):
                     portal.wait_for_load_state("networkidle", timeout=20_000)
                 self._page = portal
-                # Se o aviso de sessão cobrir a tela antes de um clique do robô, responde antes.
-                with contextlib.suppress(Exception):
-                    portal.add_locator_handler(
-                        portal.locator(_MODALS).filter(has_text=SESSION_PROMPT),
-                        lambda _modal, tab=portal: keep_session(tab),
-                        no_wait_after=True,
-                    )
-                with contextlib.suppress(Exception):
-                    portal.add_locator_handler(
-                        portal.locator(_IDLE_MODAL),
-                        lambda _modal, tab=portal: keep_session(tab),
-                        no_wait_after=True,
-                    )
+                watch_session_prompts(portal)
                 return True
             if not notified and on_waiting is not None and time.monotonic() - started > 30:
                 with contextlib.suppress(Exception):

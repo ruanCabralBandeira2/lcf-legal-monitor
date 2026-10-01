@@ -63,3 +63,5 @@
 | Pausar sites | `PAUSED_SITES` no `.env` (`monitor-run` sai sem janela nem aviso; `sites-report` marca `pausado`) | JFRJ e TRF4 pausados em 01/10/2026 |
 | PJe sem "acessar apps deste dispositivo" | `allow_local_apps` (permissão `local-network-access` só para `PJE_LOCAL_APP_ORIGINS`) | o Chrome perguntava em toda rodada (contexto limpo); relato do operador em 01/10/2026 |
 | eproc no perfil normal do Chrome do robô | `SourceEndpoint.persistent_profile`, `_profile_context` | "dispositivo confiável" do 2FA não vale em janela anônima (manual oficial); 01/10/2026 |
+| Portal: avisos de sessão e inatividade respondidos durante a rodada | `keep_session`, `_confirm_idle_modal`, `watch_session_prompts` (vigias com `.first`) | Portal parou aos ~10 min em 01/10/2026 (01:31 e 13:14) |
+| Login diário do PJe às 13:00 | agenda `janela-login` 13:00/00:00 | SSO do PJe dura 12 h sem renovação; um PIN + 2FA por dia (01/10/2026) |

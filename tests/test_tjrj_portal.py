@@ -14,6 +14,7 @@ from legal_monitor.connectors.tjrj_portal import (
     is_session_prompt,
     item_from_card,
     keep_session,
+    watch_session_prompts,
 )
 from legal_monitor.monitoring.monitor import connector_for
 
@@ -475,3 +476,40 @@ class PortalIdleModalBrowserTests(unittest.TestCase):
 
         with ThreadPoolExecutor(max_workers=1) as pool:
             self.assertEqual(pool.submit(run).result(timeout=120), "continuou")
+
+
+# Falha de 01/10/2026, 13:14: o aviso falava da sessão e casava com vários seletores de
+# caixa (caixa e .modal-dialog); o vigia do Playwright quebrava cada clique por
+# "strict mode violation".
+_PROMPT_OVER_FORM = """<html><body>
+<button id="pesquisar" onclick="document.body.dataset.ok='pesquisou'">Pesquisar</button>
+<div id="aviso" class="modal fade" role="dialog"
+  style="display:none;position:fixed;inset:0;background:#fff"><div class="modal-dialog">
+  <div class="modal-content"><div class="modal-body">Sua sessão irá expirar. Deseja prolongar?
+  </div><div class="modal-footer"><button onclick="var m=document.getElementById('aviso');
+    m.classList.remove('show'); m.style.display='none'">Sim</button></div></div></div></div>
+<script>setTimeout(function () { var m = document.getElementById('aviso');
+  m.classList.add('show'); m.style.display = 'block'; }, 300);</script></body></html>"""
+
+
+@unittest.skipUnless(Path(CHROME).exists(), "Google Chrome ausente")
+class PortalSessionWatcherBrowserTests(unittest.TestCase):
+    def test_session_prompt_over_form_does_not_break_clicks(self) -> None:
+        def run() -> object:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(_PROMPT_OVER_FORM)
+                    watch_session_prompts(page)
+                    page.wait_for_timeout(800)
+                    self.assertEqual(page.locator("#aviso.show").count(), 1)
+                    page.click("#pesquisar", timeout=10_000)
+                    return page.evaluate("document.body.dataset.ok")
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual(pool.submit(run).result(timeout=120), "pesquisou")

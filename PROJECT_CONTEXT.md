@@ -10,6 +10,7 @@ Atualizado em 30/09/2026 (noite, Mac mini). Este arquivo é o ponto de retomada 
 - **Validado em 01/10/2026 (madrugada), sem intervenção:** Portal (44), PJe TJRJ (3), TRF2 (login novo sem 2FA, cookie `EPROC_A` no perfil normal) e eproc TJRJ (certificado direto ao painel). PJeOffice em "Solicitar senha uma vez (no login)" e certificado memorizado; SafeSign com "Timeout do PIN" desabilitado; tela do Mac sem bloqueio.
 - **Pendentes:** JFRJ (titular ainda sem 2FA; pausado), TRF4 (sem cadastro; pausado), TRT1 (leitor do PJe-KZ), agravo de 2º grau no Portal (pesquisa de 2ª instância), 2 processos PJe em que o advogado não é parte (ignorar/desativar).
 - **Robustez:** salvar só cookies no modo CDP; tempo máximo de 90 min por rodada; sequência de login com um processo por site.
+- **01/10/2026, 13:00:** eproc e TRF2 sem intervenção; Portal entrou sozinho (sem PIN), mas parou no 25º processo: o aviso de inatividade (~10 min após o login) casava com dois seletores e o vigia do Playwright quebrava os cliques ("strict mode violation"). Corrigido com `watch_session_prompts` (`.first`). **PJe:** a sessão do SSO (Keycloak) dura 12 h, sem renovação (cookie `KEYCLOAK_SESSION`); depois disso o login é refeito e o PJeOffice pede o PIN e o PJe o 2FA. Decisão do operador: um login por dia às 13:00, que cobre também a rodada de 00:00.
 
 ## Retomada (30/09/2026, noite): operação migrada para o Mac mini
 

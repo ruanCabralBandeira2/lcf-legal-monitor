@@ -64,6 +64,34 @@ def _login_refusal(page: Page) -> str:
     return ""
 
 
+CDP_QUEUE_SECONDS = 50 * 60
+
+
+@contextlib.contextmanager
+def _exclusive_lock(path: Path, wait_seconds: float, poll_seconds: float = 2.0) -> Iterator[None]:
+    """Espera a vez de usar o Chrome do robô; o sistema libera a trava se o processo morrer."""
+    import fcntl
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as handle:
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    minutes = int(wait_seconds // 60)
+                    raise BrowserUnavailableError(
+                        f"Chrome do robô ocupado por outro robô há mais de {minutes} min"
+                    ) from None
+                time.sleep(poll_seconds)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def minimize_window(page: Any) -> None:
     """Minimiza a janela da página no Chrome do robô (não pula na tela de quem usa o Mac)."""
     with contextlib.suppress(Exception):
@@ -188,12 +216,16 @@ class BrowserSessionManager:
             options["storage_state"] = str(state_path)
         with sync_playwright() as playwright:
             if self._cdp_url:
-                yield from self._cdp_context(
-                    playwright,
-                    options,
-                    state_path,
-                    self._minimize if minimize is None else minimize,
-                )
+                # Fila: um robô por vez no Chrome do robô (01/10/2026). Com dois clientes
+                # conectados, cada janela nova espera os dois a liberarem; um robô ocupado
+                # fora do navegador congelava as janelas do outro (TRF2/TRF4, PJe).
+                with _exclusive_lock(self._root / "chrome-robo-uso.lock", CDP_QUEUE_SECONDS):
+                    yield from self._cdp_context(
+                        playwright,
+                        options,
+                        state_path,
+                        self._minimize if minimize is None else minimize,
+                    )
                 return
             launch: dict[str, Any] = {"headless": self._headless if headless is None else headless}
             if self._channel:

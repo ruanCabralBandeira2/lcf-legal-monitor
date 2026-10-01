@@ -376,7 +376,7 @@ _TROCAR_PERFIL = """<html><body>
     <li onclick="escolher('Advogado')">Advogado</li></ul></div>
 </div></app-dropdown></div>
 <div class="modal-footer">
-  <a id="entrar" class="isDisabled" role="button" href="javascript:void(0)"
+  <a id="entrar" class="isDisabled" role="button" href="javascript:void(0)" style="display:contents"
      onclick="if (!this.classList.contains('isDisabled'))
        document.body.dataset.ok = document.body.dataset.perfil">
      <div class="rodape-confirma">Entrar</div></a>

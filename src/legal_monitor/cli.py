@@ -545,6 +545,8 @@ def sites_report() -> int:
             site, {"count": 0, "status": {}, "last_success": None, "procura": {}}
         )
         bucket["count"] += 1
+        if site.split(":")[-1] in settings.paused_sites:
+            bucket["pausado"] = True
         status, last_success = statuses.get(process.id, ("SEM_ESTADO", None))
         bucket["status"][status] = bucket["status"].get(status, 0) + 1
         for key in candidate_keys(process.cnj):
@@ -1140,6 +1142,9 @@ def monitor_run(
         if not acquired:
             _emit({"ok": True, "site": site or "todos", "skipped": "rodada já em andamento"})
             return 0
+        if site is not None and site in settings.paused_sites:
+            _emit({"ok": True, "site": site, "skipped": "site pausado (PAUSED_SITES no .env)"})
+            return 0
         watchdog = _start_watchdog(site or "todos", RUN_MAX_SECONDS)
         try:
             return _monitor_run_locked(
@@ -1352,6 +1357,7 @@ def _monitor_run_locked(
     marker = settings.temp_dir / "alerta-banco-fora.txt"
     try:
         summary = service.run(
+            paused=frozenset(settings.paused_sites),
             site=site,
             max_processes=max_processes,
             only_digits=CnjNumber.parse(only_process).digits if only_process else None,

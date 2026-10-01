@@ -59,3 +59,5 @@
 | Perfil "Advogado" no Portal | `_choose_lawyer_profile` (caixa `#dropdownPerfil`, "Entrar" visível) | teste com réplica da tela real e janela oculta "pegadinha" |
 | Login automático do eproc e 2FA | `AUTO_CERT_LOGIN`, `login(visible=False)`; "Não usar o 2FA neste dispositivo e navegador" (manual oficial) | aguarda o operador marcar a opção no JFRJ e no TRF2 |
 | Rodadas nunca travam a agenda | `_save_state(cookies_only=True)`, `_start_watchdog` (90 min), `_run_site_process` | após TRF2/TRF4 presos em `storage_state()` em 01/10/2026 |
+| Fila de um robô por vez no Chrome do robô | `_exclusive_lock` em `legal_monitor.browser.session` (`CDP_QUEUE_SECONDS`) | após travas com dois clientes CDP simultâneos (01/10/2026) |
+| Pausar sites | `PAUSED_SITES` no `.env` (`monitor-run` sai sem janela nem aviso; `sites-report` marca `pausado`) | JFRJ e TRF4 pausados em 01/10/2026 |

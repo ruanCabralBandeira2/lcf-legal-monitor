@@ -372,17 +372,19 @@ class TjrjPortalConnector:
                         typing.first.press_sequentially("Advog", delay=60)
                         tab.wait_for_timeout(800)
             steps: list[str] = []
-            # Só o "Entrar" visível da janela de perfil: o Portal tem outras janelas ocultas com o
-            # mesmo botão verde (1º teste real, 01/10/2026: o clique ia para uma delas).
+            # O "Entrar" é a caixa verde .rodape-confirma (ícone fa-check) dentro de um <a> sem
+            # tamanho próprio: o robô via o <a> como invisível e não clicava (01/10/2026). Clica
+            # na caixa visível da janela de perfil; o clique sobe para o <a>. Outras janelas
+            # ocultas do Portal têm o mesmo botão: por isso só a visível.
             enter = tab.locator(
-                "app-trocar-perfil .modal-footer a:has(.rodape-confirma), "
-                ".modal-footer a:has(.rodape-confirma)"
+                "app-trocar-perfil .rodape-confirma, .modal-footer .rodape-confirma"
             ).filter(visible=True)
 
             def enter_enabled() -> bool:
                 with contextlib.suppress(Exception):
-                    return bool(enter.count()) and "isDisabled" not in (
-                        enter.first.get_attribute("class") or ""
+                    return bool(enter.count()) and not enter.first.evaluate(
+                        "e => { const a = e.closest('a');"
+                        " return !!(a && a.classList.contains('isDisabled')); }"
                     )
                 return False
 
@@ -414,13 +416,9 @@ class TjrjPortalConnector:
                         steps.append("eventos_mouse")
                 enabled = wait_enabled(3)
                 steps.append(f"entrar_habilitado={enabled}")
+                steps.append(f"entrar_visivel={enter.count()}")
                 if enter.count():
-                    target = (
-                        enter.first
-                        if enabled
-                        else tab.locator(".rodape-confirma").filter(visible=True).first
-                    )
-                    target.click(timeout=5_000, force=not enabled)
+                    enter.first.click(timeout=5_000, force=not enabled)
                     steps.append("clicou_entrar" if enabled else "clicou_entrar_forcado")
                 tab.wait_for_timeout(2_500)
                 steps.append(f"saiu_da_tela={'alterar-perfil' not in tab.url}")

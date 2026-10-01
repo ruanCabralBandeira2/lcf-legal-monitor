@@ -204,6 +204,7 @@ class MonitorService:
         site: str | None = None,
         max_processes: int | None = None,
         only_digits: str | None = None,
+        paused: frozenset[str] = frozenset(),
     ) -> RunSummary:
         """Rodada completa; com `site`, só aquele site (um robô por site, agendas próprias)."""
         summary = RunSummary(started_at=datetime.now(UTC))
@@ -237,6 +238,7 @@ class MonitorService:
                     order.append(key)
         if site is not None:
             order = [key for key in order if key == site]
+        order = [key for key in order if key not in paused]
         for key in order:
             endpoint = CATALOG[key]
             group = [

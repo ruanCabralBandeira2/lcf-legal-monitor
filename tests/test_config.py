@@ -129,3 +129,12 @@ class RobotChromeConfigTests(unittest.TestCase):
             for bad in ("http://192.168.0.10:9222", "https://127.0.0.1:9222", "http://x.com:9222"):
                 with self.assertRaises(ConfigError, msg=bad):
                     load(bad)
+
+    def test_paused_sites_list(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            settings = Settings.from_env(
+                {"PAUSED_SITES": " eproc-jfrj-1g, eproc-trf4-2g ,"},
+                root_dir=Path(folder),
+                load_dotenv=False,
+            )
+        self.assertEqual(settings.paused_sites, ("eproc-jfrj-1g", "eproc-trf4-2g"))

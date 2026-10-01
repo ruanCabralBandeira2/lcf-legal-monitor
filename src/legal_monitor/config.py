@@ -95,6 +95,9 @@ class Settings:
     # Com seleção automática do certificado (política do Chrome) e PIN em cache, os robôs
     # sem janela de login (eproc de hora em hora) podem refazer o login sozinhos.
     auto_cert_login: bool = False
+    # Sites pausados pelo operador (ex.: JFRJ sem o 2FA configurado): os robôs desses sites
+    # saem sem abrir janela nem mandar aviso. Reativar = tirar o site da lista.
+    paused_sites: tuple[str, ...] = ()
 
     @classmethod
     def from_env(
@@ -215,6 +218,7 @@ class Settings:
             browser_cdp_url=merged.get("BROWSER_CDP_URL", "").strip(),
             browser_minimize=_parse_bool(merged.get("BROWSER_MINIMIZE"), default=True),
             auto_cert_login=_parse_bool(merged.get("AUTO_CERT_LOGIN")),
+            paused_sites=_parse_list(merged.get("PAUSED_SITES")),
         )
         settings.validate()
         return settings

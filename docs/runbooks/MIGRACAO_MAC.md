@@ -63,7 +63,7 @@ TEST_DATABASE_URL=postgresql://legal_monitor:legal_monitor_dev@127.0.0.1:5432/le
 
 ### Estado no Mac (30/09/2026)
 
-- Projeto em `~/lcf-legal-monitor`, branch `claude/m4-rota-email-sessao`, `.venv` Python 3.12.13, hooks ativos.
+- Projeto em `~/lcf-legal-monitor`, branch `claude/m4-rota-email-sessao`, hooks ativos. Python 3.12.13 dentro do projeto (`.tools/python/`, fora do Git) e `.venv` criado a partir dele em 01/10/2026; antes o ambiente dependia de `~/Documents/ChatGPT/LCF ADVOGADOS/.tools`. Reserva do ambiente antigo: `.venv-antigo`.
 - `.env` (com `BROWSER_CHANNEL=chrome`), carteira e dump copiados; banco restaurado (118 processos, migrações 001-006) e `sites-report` ok.
 - Testes PostgreSQL rodam num banco separado `legal_monitor_test` (nunca no banco operacional):
   `TEST_DATABASE_URL=postgresql://legal_monitor:legal_monitor_dev@127.0.0.1:5432/legal_monitor_test .venv/bin/python -m pytest` - todos aprovados; Ruff ok.

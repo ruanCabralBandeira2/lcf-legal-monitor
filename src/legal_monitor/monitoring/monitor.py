@@ -43,6 +43,15 @@ MISSING_DOWNLOAD_FAILED = "o documento existe, mas o download falhou"
 BASELINE_LINES_PER_EMAIL = 40
 
 
+def shorten(text: str, limit: int) -> str:
+    """Corta no fim de uma palavra e marca com "…" (e-mail de 30/09/2026 cortava no meio)."""
+    clean = " ".join(text.split())
+    if len(clean) <= limit:
+        return clean
+    cut = clean[:limit].rsplit(" ", 1)[0].rstrip(" |,;:-")
+    return f"{cut}…"
+
+
 def movement_from_item(
     item: TimelineItem, *, observed_at: datetime, system: SourceSystem = SourceSystem.PJE
 ) -> Movement:
@@ -263,7 +272,7 @@ class MonitorService:
             return 0
         lines = []
         for process, item in self._baseline:
-            text = "(restrito)" if process.sensitivity == "RESTRICTED" else item.text[:90]
+            text = "(restrito)" if process.sensitivity == "RESTRICTED" else shorten(item.text, 160)
             lines.append(f"- {process.cnj} | {item.date_text or 's/ data'} | {text}")
         sent = 0
         for start in range(0, len(lines), BASELINE_LINES_PER_EMAIL):
@@ -468,7 +477,8 @@ class MonitorService:
     ) -> None:
         restricted = process.sensitivity == "RESTRICTED"
         lines = [
-            f"- {item.date_text or 's/ data'} | {'(restrito)' if restricted else item.text[:110]}"
+            f"- {item.date_text or 's/ data'} | "
+            + ("(restrito)" if restricted else shorten(item.text, 160))
             for item in items[:MAX_BURST_LINES]
         ]
         if len(items) > MAX_BURST_LINES:

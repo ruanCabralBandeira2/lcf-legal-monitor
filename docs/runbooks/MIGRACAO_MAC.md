@@ -83,7 +83,7 @@ PJe TJRJ e Portal de Serviços do TJRJ **não guardam sessão**: o login acontec
 
 ## 4. Onde paramos (pendências em ordem de prioridade)
 
-1. **Portal de Serviços do TJRJ (44)** — **feito em 30/09/2026** (ADR-010): 44/44 lidos. Falta validar o download de peça na primeira novidade real e decidir a seleção automática do certificado (`AutoSelectCertificateForUrls`) para rodar sem ninguém.
+1. **Portal de Serviços do TJRJ (44)** — **feito em 30/09/2026** (ADR-010): 44/44 lidos. Peça real validada (`fetch-latest ... --com-peca --operador`). Falta decidir a seleção automática do certificado (`AutoSelectCertificateForUrls`) para rodar sem ninguém.
 2. **TRF2 (1 processo)** — o robô grava 50 eventos (1 a 50, último em 08/07/2020). Perguntar ao operador qual é o último evento no eproc do TRF2. Se houver mais de 50, o carregamento sob demanda (`#carregarNovosEventos`) não está sendo disparado pela rolagem.
 3. **PJe TJRJ (5)** — 3 com histórico. Os outros 2 mostram o aviso da Resolução CNJ "advogado não faz parte": o robô recusa; o operador pediu para ignorá-los por enquanto (habilitar o advogado ou desativar com `admin-deactivate-process`).
 4. **JFRJ (61)** — login OAB + senha + 2FA do titular e depois `monitor-run --site eproc-jfrj-1g`.

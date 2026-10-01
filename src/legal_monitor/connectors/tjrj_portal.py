@@ -18,10 +18,12 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import json
 import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from legal_monitor.connectors.errors import AuthenticationRequired, ConnectorError
 from legal_monitor.connectors.pje import TimelineDocument, TimelineItem
@@ -48,7 +50,7 @@ _DOC_PRIORITY = (
     re.compile(r"Original", re.I),
     re.compile(r"Simplificad", re.I),
 )
-DOWNLOAD_TIMEOUT_S = 40
+DOWNLOAD_TIMEOUT_S = 60
 NOT_FOUND_TEXT = re.compile(
     r"n[aã]o (?:foi |foram )?encontrad|nenhum (?:processo|registro)", re.IGNORECASE
 )
@@ -196,6 +198,58 @@ def item_from_card(card: dict[str, Any], page_no: int = 1) -> TimelineItem | Non
     return TimelineItem(date_text, text, (document,) if document else ())
 
 
+def _mask_url(url: str) -> str:
+    """Endereço sem query e com números longos mascarados (diagnóstico sem conteúdo)."""
+    parsed = urlparse(url)
+    if parsed.scheme in ("blob", "data", "about", "chrome-extension"):
+        return f"{parsed.scheme}:…"
+    path = re.sub(r"\d{3,}", "N", parsed.path)
+    path = re.sub(r"[A-Za-z0-9_-]{24,}", "…", path)
+    fragment = re.sub(r"\d{3,}", "N", parsed.fragment.split("?")[0])
+    fragment = re.sub(r"[A-Za-z0-9_%+=-]{24,}", "…", fragment)[:50]
+    return f"{parsed.hostname or ''}{path[:120]}" + (f"#{fragment}" if fragment else "")
+
+
+def _describe_control(control: Any) -> dict[str, str]:
+    """Tag e atributos do controle de peça (mascarados), para entender o que ele abre."""
+    with contextlib.suppress(Exception):
+        attrs = control.evaluate(
+            "e => ({tag: e.tagName, ...Object.fromEntries("
+            "[...e.attributes].map(a => [a.name, a.value]))})"
+        )
+        return {k: re.sub(r"\d{3,}", "N", str(v))[:160] for k, v in attrs.items()}
+    return {}
+
+
+_BASE64_PDF = re.compile(r"JVBERi0[A-Za-z0-9+/=\\]{200,}")
+
+
+def _pdf_from_response(response: Any, context: Any = None) -> bytes | None:
+    """PDF binário (application/pdf, octet-stream...) ou PDF em base64 dentro de JSON/texto.
+
+    1º teste real (30/09/2026): "Visualizar Ato Assinado" abre uma aba em
+    `gedcacheweb/default.aspx` com `application/pdf`; o visualizador do Chrome toma o corpo
+    da resposta, então o mesmo endereço é pedido de novo com a sessão do contexto."""
+    with contextlib.suppress(Exception):
+        if not response.url.startswith("http"):
+            return None
+        kind = (response.headers or {}).get("content-type", "").lower()
+        if any(word in kind for word in ("pdf", "octet-stream", "download", "binary")):
+            body = b""
+            with contextlib.suppress(Exception):
+                body = response.body()
+            if not body.startswith(b"%PDF") and context is not None:
+                again = context.request.get(response.url, timeout=60_000)
+                body = again.body() if again.ok else b""
+            return body if body.startswith(b"%PDF") else None
+        if "json" in kind or "text/plain" in kind:
+            found = _BASE64_PDF.search(response.text())
+            if found:
+                data = base64.b64decode(found.group(0).replace("\\/", "/").replace("\\", ""))
+                return data if data.startswith(b"%PDF") else None
+    return None
+
+
 class TjrjPortalConnector:
     """Mesma interface do PJe/eproc: `open_autos`, `read_timeline`, `download_document`."""
 
@@ -208,6 +262,7 @@ class TjrjPortalConnector:
             raise ValueError("TjrjPortalConnector exige a fonte tjrj-portal do catálogo")
         self.endpoint = endpoint
         self._page: Page | None = None
+        self.diagnostics_dir = Path("storage/tmp/diagnostico")
 
     # --- login -------------------------------------------------------------------------
     def login(self, context: BrowserContext, on_waiting: Any = None) -> bool:
@@ -464,52 +519,59 @@ class TjrjPortalConnector:
         if mark is None:
             raise ConnectorError(ErrorCode.PARSE_ERROR, "Controle da peça sumiu do cartão")
 
-        captured: dict[str, Any] = {}
+        responses: list[Any] = []
+        downloads: list[Any] = []
         pages_before = set(context.pages)
 
         def on_response(response: Any) -> None:
-            with contextlib.suppress(Exception):
-                kind = (response.headers or {}).get("content-type", "").lower()
-                if (
-                    "pdf" not in captured
-                    and response.url.startswith("http")
-                    and ("application/pdf" in kind or "octet-stream" in kind)
-                ):
-                    body = response.body()
-                    if body.startswith(b"%PDF"):
-                        captured["pdf"] = body
+            responses.append(response)  # o corpo é lido fora do evento (API síncrona)
 
         def on_download(download: Any) -> None:
-            captured.setdefault("download", download)
-
-        context.on("response", on_response)
-        portal = self._page
-        if portal is not None:
-            portal.on("download", on_download)
+            downloads.append(download)
 
         def on_page(tab: Any) -> None:
             tab.on("download", on_download)
 
+        portal = self._page
+        context.on("response", on_response)
         context.on("page", on_page)
+        if portal is not None:
+            portal.on("download", on_download)
+        control = autos.locator(f"[data-lcf-doc='{mark}']").first
+        clicked = _describe_control(control)
         try:
-            autos.locator(f"[data-lcf-doc='{mark}']").first.click(timeout=10_000)
+            control.click(timeout=10_000)
             deadline = time.monotonic() + DOWNLOAD_TIMEOUT_S
-            while time.monotonic() < deadline and not captured:
+            checked = 0
+            while time.monotonic() < deadline:
                 (portal or autos.page).wait_for_timeout(500)
-                if not captured:
-                    embedded = self._embedded_pdf(context)
-                    if embedded:
-                        captured["pdf"] = embedded
-            if "download" in captured:
-                captured["download"].save_as(str(target))
-            elif "pdf" in captured:
-                target.write_bytes(captured["pdf"])
-            else:
-                raise ConnectorError(
-                    ErrorCode.PARSE_ERROR,
-                    f"Portal: nenhum PDF recebido ao abrir '{document.label[:40]}'",
-                )
-            return target
+                if downloads:
+                    downloads[0].save_as(str(target))
+                    return target
+                while checked < len(responses):
+                    data = _pdf_from_response(responses[checked], context)
+                    checked += 1
+                    if data:
+                        target.write_bytes(data)
+                        return target
+                for tab in set(context.pages) - pages_before:
+                    with contextlib.suppress(Exception):
+                        if tab.url.startswith("blob:"):
+                            # Aba blob: com o PDF; o endereço é da mesma origem do quadro.
+                            data = base64.b64decode(autos.evaluate(_BLOB_JS, tab.url))
+                            if data.startswith(b"%PDF"):
+                                target.write_bytes(data)
+                                return target
+                embedded = self._embedded_pdf(context)
+                if embedded:
+                    target.write_bytes(embedded)
+                    return target
+            report = self._download_report(context, pages_before, responses, clicked)
+            raise ConnectorError(
+                ErrorCode.PARSE_ERROR,
+                f"Portal: nenhum PDF recebido ao abrir '{document.label[:40]}'"
+                + (f" | diagnóstico: {report}" if report else ""),
+            )
         finally:
             with contextlib.suppress(Exception):
                 context.remove_listener("response", on_response)
@@ -522,6 +584,28 @@ class TjrjPortalConnector:
             # Fecha a janela da peça, se abriu sobre a lista.
             with contextlib.suppress(Exception):
                 (portal or autos.page).keyboard.press("Escape")
+
+    def _download_report(
+        self, context: BrowserContext, pages_before: set[Any], responses: list[Any], clicked: dict
+    ) -> str:
+        """Diagnóstico sem conteúdo do clique na peça: controle, abas e respostas mascaradas."""
+        with contextlib.suppress(Exception):
+            portal = self._page
+            report = {
+                "controle": clicked,
+                "abas_novas": [_mask_url(t.url) for t in set(context.pages) - pages_before],
+                "quadros": [_mask_url(f.url) for f in portal.frames] if portal else [],
+                "respostas": [
+                    f"{r.status} {(r.headers or {}).get('content-type', '')[:40]} "
+                    f"{r.request.resource_type} {_mask_url(r.url)}"
+                    for r in responses[:80]
+                ],
+            }
+            self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+            path = self.diagnostics_dir / f"portal-peca-{time.strftime('%Y%m%d-%H%M%S')}.json"
+            path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+            return str(path)
+        return ""
 
     @staticmethod
     def _embedded_pdf(context: BrowserContext) -> bytes | None:

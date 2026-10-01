@@ -122,7 +122,11 @@ class LatestMovementService:
         diagnostics_dir: Path,
         notifier: Notifier | None,
         max_attachment_bytes: int,
+        prefer_document: bool = False,
     ) -> None:
+        # Teste de peça: em vez da última movimentação, a mais recente que tenha peça
+        # (nunca intimação/citação).
+        self._prefer_document = prefer_document
         self._sessions = sessions
         self._documents = documents
         self._diagnostics_dir = diagnostics_dir
@@ -133,6 +137,12 @@ class LatestMovementService:
         result = LatestResult(process=str(cnj))
         endpoints = [get_endpoint(source_key)] if source_key else list(candidate_sources(cnj))
         for endpoint in endpoints:
+            if endpoint.key == "tjrj-portal":
+                outcome = self._try_portal(cnj, endpoint, result)
+                result.tried.append({"source": endpoint.key, "result": outcome})
+                if result.found:
+                    break
+                continue
             if endpoint.system is not SourceSystem.PJE:
                 result.tried.append({"source": endpoint.key, "result": "conector ainda não feito"})
                 continue
@@ -161,19 +171,57 @@ class LatestMovementService:
                     if page is not None:
                         result.diagnostics.append(str(self._dump(connector, page, endpoint)))
                 return f"{exc.code.value}: {exc}"
-            result.found = True
-            result.source = endpoint.key
-            latest = items[0]
-            result.movement_date = latest.date_text
-            result.movement_text = latest.text[:MAX_MOVEMENT_TEXT]
-            record = self._download_first(context, connector, autos, cnj, endpoint, latest, result)
-            if self._notifier is not None:
-                attached = record is not None and record.bytes <= self._max_attachment
-                self._notifier.send(
-                    build_movement_message(cnj, endpoint, latest, record, attached=attached)
+            return self._deliver(context, connector, autos, cnj, endpoint, items, result)
+
+    def _try_portal(self, cnj: CnjNumber, endpoint: SourceEndpoint, result: LatestResult) -> str:
+        """Portal do TJRJ: login dentro do mesmo contexto (a sessão vive na aba, ADR-010)."""
+        from legal_monitor.connectors.tjrj_portal import TjrjPortalConnector
+
+        connector = TjrjPortalConnector(endpoint)
+        with self._sessions.context(endpoint, headless=False) as context:
+            if not connector.login(context):
+                return "login não concluído"
+            try:
+                autos = connector.open_autos(context, cnj)
+                items = connector.read_timeline(autos)
+            except ConnectorError as exc:
+                return f"{exc.code.value}: {exc}"
+            return self._deliver(context, connector, autos, cnj, endpoint, items, result)
+
+    def _pick(self, items):
+        if self._prefer_document:
+            for item in items:
+                if item.documents and item.documents_allowed:
+                    return item
+        return items[0]
+
+    def _deliver(self, context, connector, autos, cnj, endpoint, items, result) -> str:
+        result.found = True
+        result.source = endpoint.key
+        latest = self._pick(items)
+        result.movement_date = latest.date_text
+        result.movement_text = latest.text[:MAX_MOVEMENT_TEXT]
+        record = (
+            self._download_first(context, connector, autos, cnj, endpoint, latest, result)
+            if latest.documents_allowed
+            else None
+        )
+        missing = None
+        if record is None:
+            if not latest.documents_allowed:
+                missing = "intimação/citação: o robô não abre esses documentos; consulte no sistema"
+            else:
+                errors = [t["result"][5:] for t in result.tried if t["result"].startswith("doc: ")]
+                missing = errors[-1].split(" | diagnóstico:")[0][:150] if errors else None
+        if self._notifier is not None:
+            attached = record is not None and record.bytes <= self._max_attachment
+            self._notifier.send(
+                build_movement_message(
+                    cnj, endpoint, latest, record, attached=attached, missing_reason=missing
                 )
-                result.emailed = True
-            return "OK"
+            )
+            result.emailed = True
+        return "OK"
 
     def _download_first(self, context, connector, autos, cnj, endpoint, item, result):
         for document in item.documents:

@@ -1194,11 +1194,18 @@ def _monitor_run_locked(
     return 0
 
 
-def fetch_latest(number: str, send: bool, source: str | None) -> int:
+def fetch_latest(
+    number: str,
+    send: bool,
+    source: str | None,
+    with_document: bool = False,
+    to_operator: bool = False,
+) -> int:
     settings = Settings.from_env()
     cnj = CnjNumber.parse(number)
+    recipients = settings.email_operator_to if to_operator else settings.email_lawyer_to
     notifier = (
-        _email_notifier(settings, settings.email_lawyer_to, settings.storage_dir) if send else None
+        _email_notifier(settings, recipients, settings.storage_dir) if send or to_operator else None
     )
     service = LatestMovementService(
         sessions=_session_manager(settings),
@@ -1206,6 +1213,7 @@ def fetch_latest(number: str, send: bool, source: str | None) -> int:
         diagnostics_dir=settings.temp_dir / "diagnostico",
         notifier=notifier,
         max_attachment_bytes=settings.email_max_attachment_bytes,
+        prefer_document=with_document,
     )
     result = service.run(cnj, source_key=source)
     _emit({"ok": result.found, **result.as_dict()})
@@ -1505,6 +1513,16 @@ def build_parser() -> argparse.ArgumentParser:
     latest_parser.add_argument("number")
     latest_parser.add_argument("--send", action="store_true")
     latest_parser.add_argument("--source", choices=sorted(CATALOG))
+    latest_parser.add_argument(
+        "--com-peca",
+        action="store_true",
+        help="usa a movimentação mais recente que tenha peça (teste de download)",
+    )
+    latest_parser.add_argument(
+        "--operador",
+        action="store_true",
+        help="envia o e-mail ao operador (teste), não ao advogado",
+    )
     return parser
 
 
@@ -1564,7 +1582,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "diagnostico-tjrj":
             return tjrj_diagnostic(args.number, args.sem_portal, args.com_publica, args.automatico)
         if args.command == "fetch-latest":
-            return fetch_latest(args.number, args.send, args.source)
+            return fetch_latest(args.number, args.send, args.source, args.com_peca, args.operador)
     except (
         AdminRepositoryError,
         AdminValidationError,

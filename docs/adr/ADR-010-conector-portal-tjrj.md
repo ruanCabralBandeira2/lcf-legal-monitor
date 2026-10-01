@@ -1,6 +1,6 @@
 # ADR-010 - Conector do Portal de Serviços do TJRJ (processo eletrônico legado)
 
-- Status: aceito; implementado na versão 0.8.0 (movimentações validadas; peças pendentes)
+- Status: aceito; implementado na versão 0.8.0 (movimentações e peças validadas em 30/09/2026)
 - Data: 2026-09-30
 
 ## Contexto
@@ -20,9 +20,9 @@
 - Janela sempre visível nesse site (escolha do certificado é diálogo do navegador).
 - Entre processos, volta à pesquisa pelo botão "Voltar" do próprio Portal; se não der, recarrega a consulta passando pelo painel.
 - Leitura de cartões: tipo do movimento + pares rótulo/valor; a data principal é o primeiro campo "Data…"; o texto fica estável entre rodadas para o dedupe.
-- Agenda: 06:30 e 18:30 (`ops/launchd/registrar-robos.sh`).
+- Agenda: 06:00 e 18:00, junto com os demais robôs (pedido do operador; `ops/launchd/registrar-robos.sh`).
 - Somente leitura: nunca Petição Eletrônica, Push, Distribuição, intimações ou qualquer controle de escrita.
-- Peças ainda não são baixadas: o e-mail informa o motivo ("abra no Visualizador do Portal"). Os cartões têm "Visualizar Ato Assinado Digitalmente" e "Ver Íntegra da Decisão", candidatos para a próxima etapa.
+- Peças: um controle por cartão, na ordem "Visualizar Ato Assinado Digitalmente" > "Ver Íntegra (Original)" > "(Simplificado)". O ato assinado abre uma aba em `gedcacheweb/default.aspx` com `application/pdf`; como o visualizador do Chrome retém o corpo da resposta, o robô pede o mesmo endereço de novo com a sessão do contexto. Também cobre download direto, aba `blob:`, PDF embutido e PDF em base64 dentro de JSON. Falha gera diagnóstico mascarado (`portal-peca-*.json`). Intimação/citação nunca é aberta.
 
 ## Consequências
 

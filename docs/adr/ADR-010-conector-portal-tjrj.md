@@ -16,16 +16,16 @@
 ## Decisão
 
 - `TjrjPortalConnector` (`legal_monitor.connectors.tjrj_portal`) com a mesma interface dos conectores PJe/eproc.
-- **Login dentro da rodada** (`login_per_run`): o monitor não verifica a sessão antes; o conector abre o login no mesmo contexto da leitura, clica no botão público de certificado e espera até 5 min pelo Portal. Rodadas sem login interativo marcam `AUTH_REQUIRED`.
+- **Login dentro da rodada** (`login_per_run`): o monitor não verifica a sessão antes; o conector abre o login no mesmo contexto da leitura, clica no botão público de certificado e espera até 10 min pelo Portal. Rodadas sem login interativo marcam `AUTH_REQUIRED`.
 - Janela sempre visível nesse site (escolha do certificado é diálogo do navegador).
 - Entre processos, volta à pesquisa pelo botão "Voltar" do próprio Portal; se não der, recarrega a consulta passando pelo painel.
 - Leitura de cartões: tipo do movimento + pares rótulo/valor; a data principal é o primeiro campo "Data…"; o texto fica estável entre rodadas para o dedupe.
-- Agenda: 06:00 e 18:00, junto com os demais robôs (pedido do operador; `ops/launchd/registrar-robos.sh`).
+- Agenda: 13:00 e 00:00, dentro do robô único `janela-login` (`monitor-sequencia`), que roda os sites com login um de cada vez (pedido do operador em 30/09/2026, depois de testar todos juntos: as janelas brigavam pela tela e alguns logins esgotavam o tempo). Espera de login: 10 min.
 - Somente leitura: nunca Petição Eletrônica, Push, Distribuição, intimações ou qualquer controle de escrita.
 - Peças: um controle por cartão, na ordem "Visualizar Ato Assinado Digitalmente" > "Ver Íntegra (Original)" > "(Simplificado)". O ato assinado abre uma aba em `gedcacheweb/default.aspx` com `application/pdf`; como o visualizador do Chrome retém o corpo da resposta, o robô pede o mesmo endereço de novo com a sessão do contexto. Também cobre download direto, aba `blob:`, PDF embutido e PDF em base64 dentro de JSON. Falha gera diagnóstico mascarado (`portal-peca-*.json`). Intimação/citação nunca é aberta.
 
 ## Consequências
 
 - Validado em 30/09/2026: teste com 3 processos (51, 50 e 118 movimentações, histórico completo até a distribuição) e rodada com os 44.
-- Sem ninguém na frente do Mac, a rodada para na escolha do certificado. Rodar sozinho exige a política do Chrome `AutoSelectCertificateForUrls` restrita aos hosts do TJRJ — decisão do titular do certificado, ainda não tomada.
+- A escolha do certificado, o PIN e o perfil "Advogado" deixaram de exigir gente com o Chrome do robô sempre aberto e a política `AutoSelectCertificateForUrls` (ADR-011, 01/10/2026). O login continua dentro da rodada.
 - `--max-processos` permite validar um conector novo com poucos processos; `monitor-run` passou a ter trava por site (duas rodadas do mesmo site não correm juntas).

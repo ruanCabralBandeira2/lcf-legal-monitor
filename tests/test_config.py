@@ -112,3 +112,20 @@ class SettingsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RobotChromeConfigTests(unittest.TestCase):
+    def test_cdp_url_must_be_local(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+
+            def load(url: str) -> Settings:
+                return Settings.from_env({"BROWSER_CDP_URL": url}, root_dir=root, load_dotenv=False)
+
+            ok = load("http://127.0.0.1:9222")
+            self.assertEqual(ok.browser_cdp_url, "http://127.0.0.1:9222")
+            self.assertTrue(ok.browser_minimize)
+            self.assertFalse(ok.auto_cert_login)
+            for bad in ("http://192.168.0.10:9222", "https://127.0.0.1:9222", "http://x.com:9222"):
+                with self.assertRaises(ConfigError, msg=bad):
+                    load(bad)

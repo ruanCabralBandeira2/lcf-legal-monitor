@@ -5,10 +5,12 @@ import contextlib
 import getpass
 import importlib.util
 import json
+import os
 import platform
 import re
 import sys
 import tempfile
+import threading
 import time
 from datetime import UTC, datetime, timedelta
 from io import BytesIO
@@ -349,6 +351,8 @@ def _session_manager(settings: Settings, *, headless: bool | None = None) -> Bro
         headless=settings.browser_headless if headless is None else headless,
         channel=settings.browser_channel,
         visible_for_blocked=settings.browser_visible_for_blocked,
+        cdp_url=settings.browser_cdp_url,
+        minimize=settings.browser_minimize,
     )
 
 
@@ -1136,9 +1140,176 @@ def monitor_run(
         if not acquired:
             _emit({"ok": True, "site": site or "todos", "skipped": "rodada já em andamento"})
             return 0
-        return _monitor_run_locked(
-            settings, site, notify_initial, interactive_login, max_processes, only_process
+        watchdog = _start_watchdog(site or "todos", RUN_MAX_SECONDS)
+        try:
+            return _monitor_run_locked(
+                settings, site, notify_initial, interactive_login, max_processes, only_process
+            )
+        finally:
+            watchdog.cancel()
+
+
+# Rede de segurança (01/10/2026): duas rodadas do eproc ficaram presas numa chamada do
+# navegador e, com a trava por site, bloqueariam todas as rodadas seguintes daquele site.
+RUN_MAX_SECONDS = 90 * 60
+
+
+def _start_watchdog(site: str, seconds: int) -> threading.Timer:
+    """Encerra o processo se a rodada passar do limite; o sistema libera a trava do site."""
+
+    def expire() -> None:
+        _emit({"ok": False, "site": site, "error": f"rodada passou de {seconds // 60} min"})
+        sys.stdout.flush()
+        os._exit(3)
+
+    timer = threading.Timer(seconds, expire)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
+def robot_chrome_unlock(wait_minutes: int, only_if_needed: bool = False) -> int:
+    """Depois de ligar o Mac: espera o Chrome do robô, entra no Portal pelo certificado (o
+    macOS pede o PIN do token nesse Chrome) e avisa o operador por e-mail se ninguém digitar
+    em 30 s. Com o PIN digitado uma vez, todas as rodadas seguintes entram sozinhas."""
+    import urllib.request
+
+    settings = Settings.from_env()
+    if not settings.browser_cdp_url:
+        _emit({"ok": False, "error": "BROWSER_CDP_URL não configurado no .env"})
+        return 2
+    browser_id = ""
+    for _ in range(90):
+        try:
+            with urllib.request.urlopen(  # noqa: S310 - endereço local validado na configuração
+                f"{settings.browser_cdp_url.rstrip('/')}/json/version", timeout=2
+            ) as response:
+                # O id muda a cada processo do Chrome: Chrome reaberto = PIN perdido.
+                browser_id = json.load(response).get("webSocketDebuggerUrl", "").rsplit("/", 1)[-1]
+                break
+        except (OSError, ValueError):
+            time.sleep(2)
+    else:
+        _emit({"ok": False, "error": "Chrome do robô não abriu em 3 minutos"})
+        return 1
+    marker = settings.temp_dir / "chrome-robo-desbloqueado.txt"
+    if only_if_needed and marker.is_file() and marker.read_text().strip() == browser_id:
+        _emit({"ok": True, "desbloqueado": True, "motivo": "mesmo Chrome já desbloqueado"})
+        return 0
+    with _run_lock(settings.temp_dir / "chrome-robo-desbloqueio.lock") as acquired:
+        if not acquired:
+            _emit({"ok": True, "skipped": "desbloqueio já em andamento"})
+            return 0
+        return _robot_chrome_unlock(settings, wait_minutes, browser_id, marker)
+
+
+def _robot_chrome_unlock(
+    settings: Settings, wait_minutes: int, browser_id: str, marker: Path
+) -> int:
+    operator = _operator_notifier(settings)
+
+    def on_waiting() -> None:
+        if operator is None:
+            return
+        with contextlib.suppress(EmailNotificationError):
+            operator.send(
+                NotificationMessage(
+                    title="[LCF Monitor] Mac reiniciou: digite o PIN do token",
+                    body=(
+                        "O Mac mini foi ligado ou reiniciado e o Chrome do robô está pedindo o "
+                        "PIN do token USB.\n\nPelo Parsec (computador ou celular), digite o PIN "
+                        "na janela do macOS. Basta uma vez: depois disso os robôs entram "
+                        "sozinhos até o próximo reinício.\n\n"
+                        f"O robô espera até {wait_minutes} minutos."
+                    ),
+                    correlation_id=f"pin-{datetime.now(UTC):%Y%m%dT%H%M}",
+                    demo_only=False,
+                )
+            )
+
+    from legal_monitor.connectors.tjrj_portal import TjrjPortalConnector
+
+    endpoint = get_endpoint("tjrj-portal")
+    connector = TjrjPortalConnector(endpoint)
+    # Janela visível (não minimizada): é a hora em que a pessoa precisa ver o pedido do PIN.
+    manager = BrowserSessionManager(
+        settings.browser_profile_dir,
+        channel=settings.browser_channel,
+        cdp_url=settings.browser_cdp_url,
+        minimize=False,
+    )
+    with manager.context(endpoint) as context:
+        unlocked = connector.login(
+            context, on_waiting=on_waiting, timeout_seconds=wait_minutes * 60
         )
+        if unlocked:
+            # A janela base (about:blank) segura o token: minimizada, ninguém fecha sem querer.
+            from legal_monitor.browser.session import minimize_window
+
+            for page in context.browser.contexts[0].pages if context.browser else []:
+                minimize_window(page)
+    if unlocked:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(browser_id, encoding="utf-8")
+    # O PJe usa o PJeOffice, que pede o PIN na janela dele (também uma vez por reinício, com a
+    # opção "Apenas no primeiro acesso"). Pede agora, junto, para não travar a rodada das 13h.
+    pje_state = "não tentado"
+    if unlocked:
+        with contextlib.suppress(Exception):
+            pje_state = manager.login(
+                get_endpoint("pje-tjrj-1g"),
+                click_certificate=True,
+                on_waiting_approval=on_waiting,
+                timeout_seconds=wait_minutes * 60,
+            ).state.value
+    _emit({"ok": unlocked, "desbloqueado": unlocked, "pje_pjeoffice": pje_state})
+    return 0 if unlocked else 1
+
+
+# Sites com janela de login (certificado/PIN pela pessoa). TRT1 fica fora até existir o leitor
+# do PJe-KZ: hoje ele só abriria um login sem conseguir ler nada.
+LOGIN_SEQUENCE = ("pje-tjrj-1g", "pje-tjrj-2g", "tjrj-portal")
+
+
+def _run_site_process(site: str, timeout_seconds: int) -> int:
+    """Um site da sequência em processo separado: se travar, só ele é encerrado."""
+    import subprocess
+
+    try:
+        completed = subprocess.run(  # noqa: S603 - executa o próprio programa, argumentos fixos
+            [
+                sys.executable,
+                "-c",
+                "import sys; from legal_monitor.cli import main; sys.exit(main())",
+                "monitor-run",
+                "--site",
+                site,
+            ],
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        _emit({"ok": False, "site": site, "error": "site passou do tempo máximo; encerrado"})
+        return 3
+    return completed.returncode
+
+
+def monitor_sequence(sites: list[str], runner: Any = None) -> int:
+    """Roda os sites com login um de cada vez (pedido do operador, 30/09/2026): com todos
+    juntos, as janelas brigavam pela tela e alguns logins esgotavam o tempo. Uma janela por
+    vez dá para concluir pelo Parsec do celular."""
+    settings = Settings.from_env()
+    with _run_lock(settings.temp_dir / "rodada-sequencia-login.lock") as acquired:
+        if not acquired:
+            _emit({"ok": True, "skipped": "sequência de login já em andamento"})
+            return 0
+        run_site = runner or _run_site_process
+        for site in sites:
+            print(f"--- {datetime.now().strftime('%H:%M:%S')} site {site} ---", flush=True)
+            with contextlib.suppress(Exception):
+                run_site(site, RUN_MAX_SECONDS)
+        print(f"--- {datetime.now().strftime('%H:%M:%S')} sequência concluída ---", flush=True)
+    return 0
 
 
 def _monitor_run_locked(
@@ -1176,6 +1347,7 @@ def _monitor_run_locked(
         max_attachment_bytes=settings.email_max_attachment_bytes,
         notify_initial=notify_initial,
         interactive_login=interactive_login,
+        auto_cert_login=settings.auto_cert_login,
     )
     marker = settings.temp_dir / "alerta-banco-fora.txt"
     try:
@@ -1494,6 +1666,25 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="testa só os N primeiros processos de cada site (validação de conector novo)",
     )
+    unlock_parser = subcommands.add_parser(
+        "chrome-robo-desbloquear",
+        help="após ligar o Mac: pede o PIN no Chrome do robô (uma vez) e avisa por e-mail",
+    )
+    unlock_parser.add_argument("--esperar-minutos", type=int, default=120)
+    unlock_parser.add_argument(
+        "--se-necessario",
+        action="store_true",
+        help="só pede o PIN se o Chrome do robô foi reaberto desde o último desbloqueio",
+    )
+    sequence_parser = subcommands.add_parser(
+        "monitor-sequencia",
+        help="roda os sites com login um de cada vez (uma janela por vez; agenda 13:00 e 00:00)",
+    )
+    sequence_parser.add_argument(
+        "--sites",
+        default=",".join(LOGIN_SEQUENCE),
+        help="lista separada por vírgula, na ordem desejada",
+    )
     import_parser = subcommands.add_parser(
         "import-processes", help="importa a carteira (um número por linha) e separa por site"
     )
@@ -1608,6 +1799,15 @@ def main(argv: list[str] | None = None) -> int:
                 args.max_processos,
                 args.processo,
             )
+        if args.command == "chrome-robo-desbloquear":
+            return robot_chrome_unlock(args.esperar_minutos, args.se_necessario)
+        if args.command == "monitor-sequencia":
+            sites = [site.strip() for site in args.sites.split(",") if site.strip()]
+            unknown = [site for site in sites if site not in CATALOG]
+            if unknown:
+                _emit({"ok": False, "error": f"sites desconhecidos: {unknown}"})
+                return 2
+            return monitor_sequence(sites)
         if args.command == "import-processes":
             return import_processes(args.path, args.lawyer, args.actor, args.dry_run)
         if args.command == "sites-report":

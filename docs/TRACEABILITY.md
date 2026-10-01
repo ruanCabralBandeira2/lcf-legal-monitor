@@ -53,3 +53,9 @@
 | Resumo de e-mail legível | `shorten` em `legal_monitor.monitoring.monitor` | corta no fim da palavra com "…" (160 caracteres) |
 | Teste de rotina em ambiente real | `admin-reset-history --ultimas N --com-peca` (auditado), `monitor-run --processo` | 30/09/2026: movimentação esquecida voltou como novidade, PDF baixado e e-mail enviado; agenda simultânea disparada pelo launchd (Portal 44/44 OK em 18 min) |
 | Login por certificado no JFRJ e TRF2 | `certificate_login_selector` (`SubmitCert`) no catálogo | botão conferido na página pública em 30/09/2026; login real pendente |
+| Logins um de cada vez | `monitor-sequencia` (`LOGIN_SEQUENCE`), agente `robo.janela-login` às 13:00 e 00:00 | pedido após o teste simultâneo de 30/09/2026; e-mail de espera orienta concluir pelo Parsec |
+| Chrome do robô sempre aberto (PIN uma vez por reinício) | ADR-011, `BROWSER_CDP_URL`, `chrome-robo-desbloquear`, agentes `chrome-robo` e `chrome-robo-pin` | validado em 01/10/2026: Portal sem PIN e sem clique |
+| Seleção automática do certificado | `ops/macos/certificado-automatico.sh` (política `AutoSelectCertificateForUrls`) | ativa para TJRJ, JFRJ e TRF2 (emissor AC OAB G3) |
+| Perfil "Advogado" no Portal | `_choose_lawyer_profile` (caixa `#dropdownPerfil`, "Entrar" visível) | teste com réplica da tela real e janela oculta "pegadinha" |
+| Login automático do eproc e 2FA | `AUTO_CERT_LOGIN`, `login(visible=False)`; "Não usar o 2FA neste dispositivo e navegador" (manual oficial) | aguarda o operador marcar a opção no JFRJ e no TRF2 |
+| Rodadas nunca travam a agenda | `_save_state(cookies_only=True)`, `_start_watchdog` (90 min), `_run_site_process` | após TRF2/TRF4 presos em `storage_state()` em 01/10/2026 |

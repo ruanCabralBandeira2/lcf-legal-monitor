@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 PORTAL_HOME = "https://www3.tjrj.jus.br/portalservicos/#/dashboard"
 CONSULTA_URL = "https://www3.tjrj.jus.br/portalservicos/#/consproc/consultaportal"
 CONSULTA_FRAME = "consultaprocessual"
-LOGIN_TIMEOUT_SECONDS = 300
+LOGIN_TIMEOUT_SECONDS = 600  # 10 min: login pelo Parsec do celular (30/09/2026)
 MAX_PAGES = 40
 # Motivo mostrado no e-mail enquanto o download pelo Visualizador não existe.
 NO_DOCUMENTS_REASON = (
@@ -265,7 +265,9 @@ class TjrjPortalConnector:
         self.diagnostics_dir = Path("storage/tmp/diagnostico")
 
     # --- login -------------------------------------------------------------------------
-    def login(self, context: BrowserContext, on_waiting: Any = None) -> bool:
+    def login(
+        self, context: BrowserContext, on_waiting: Any = None, timeout_seconds: int | None = None
+    ) -> bool:
         """Abre o login oficial e clica no botão público de certificado. A escolha do
         certificado e o PIN são humanos (ou a seleção automática do Chrome). Retorna True
         quando o Portal abre logado."""
@@ -281,7 +283,14 @@ class TjrjPortalConnector:
             )
         started = time.monotonic()
         notified = False
-        while time.monotonic() - started < LOGIN_TIMEOUT_SECONDS:
+        profile_tries = 0
+        limit = timeout_seconds or LOGIN_TIMEOUT_SECONDS
+        while time.monotonic() - started < limit:
+            for tab in list(context.pages):
+                with contextlib.suppress(Exception):
+                    if "alterar-perfil" in tab.url and profile_tries < 5:
+                        profile_tries += 1
+                        self._choose_lawyer_profile(tab, dump=profile_tries == 1)
             portal = self._portal_tab(context)
             if portal is not None:
                 with contextlib.suppress(Exception):
@@ -304,6 +313,149 @@ class TjrjPortalConnector:
             except Exception:
                 time.sleep(2)
         return False
+
+    def _choose_lawyer_profile(self, tab: Page, *, dump: bool = False) -> None:
+        """Depois do login o Portal pede o perfil (tela `alterar-perfil`); antes era a pessoa
+        quem clicava em "Advogado" (relato do operador, 30/09/2026). Escolhe esse perfil e
+        confirma. Sem sucesso, grava a estrutura (sem conteúdo) para ajuste."""
+        lawyer = re.compile(r"^\s*Advogad[oa]\b", re.I)
+        tab.wait_for_timeout(1_500)
+        for select in tab.locator("select:visible").all():
+            with contextlib.suppress(Exception):
+                labels = select.locator("option").all_inner_texts()
+                choice = next((label for label in labels if lawyer.search(label)), None)
+                if choice:
+                    select.select_option(label=choice)
+        if dump:
+            # Estrutura da tela de perfil (sem conteúdo), na 1ª tentativa, para ajustes.
+            with contextlib.suppress(Exception):
+                from legal_monitor.connectors.eproc import EprocConnector
+
+                self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+                EprocConnector.dump_structure(
+                    tab,
+                    self.diagnostics_dir / f"portal-perfil-{time.strftime('%Y%m%d-%H%M%S')}.json",
+                )
+
+        def visible_lawyer() -> Any:
+            for candidate in (
+                tab.get_by_role("option", name=lawyer),
+                tab.get_by_role("radio", name=lawyer),
+                tab.get_by_text(lawyer),
+            ):
+                visible = candidate.filter(visible=True) if hasattr(candidate, "filter") else None
+                if visible is not None and visible.count():
+                    return visible.first
+            return None
+
+        # Tela real (estrutura gravada em 30/09/2026): janela "Trocar perfil" com a caixa
+        # #dropdownPerfil; o clique no "quadrado" abre a lista .box-resultados; o botão verde
+        # (.rodape-confirma, "Entrar") fica desabilitado até escolher o perfil.
+        results = tab.locator("#dropdownPerfil .box-resultados").get_by_text(lawyer)
+        if tab.locator("#dropdownPerfil").count():
+            for selector in (
+                "#dropdownPerfil input:visible",
+                "#dropdownPerfil .ajustado-form:visible",
+                "#dropdownPerfil .select-autocomplete:visible",
+            ):
+                if results.filter(visible=True).count():
+                    break
+                with contextlib.suppress(Exception):
+                    target = tab.locator(selector)
+                    if target.count():
+                        target.first.click(timeout=5_000)
+                        tab.wait_for_timeout(800)
+            if not results.filter(visible=True).count():
+                with contextlib.suppress(Exception):
+                    typing = tab.locator("#dropdownPerfil input:visible")
+                    if typing.count():
+                        typing.first.press_sequentially("Advog", delay=60)
+                        tab.wait_for_timeout(800)
+            steps: list[str] = []
+            # Só o "Entrar" visível da janela de perfil: o Portal tem outras janelas ocultas com o
+            # mesmo botão verde (1º teste real, 01/10/2026: o clique ia para uma delas).
+            enter = tab.locator(
+                "app-trocar-perfil .modal-footer a:has(.rodape-confirma), "
+                ".modal-footer a:has(.rodape-confirma)"
+            ).filter(visible=True)
+
+            def enter_enabled() -> bool:
+                with contextlib.suppress(Exception):
+                    return bool(enter.count()) and "isDisabled" not in (
+                        enter.first.get_attribute("class") or ""
+                    )
+                return False
+
+            def wait_enabled(seconds: float) -> bool:
+                for _ in range(int(seconds / 0.3)):
+                    if enter_enabled():
+                        return True
+                    tab.wait_for_timeout(300)
+                return enter_enabled()
+
+            with contextlib.suppress(Exception):
+                visible = results.filter(visible=True)
+                steps.append(f"opcoes_visiveis={visible.count()}")
+                if visible.count():
+                    visible.first.click(timeout=5_000)
+                    steps.append("clicou_advogado")
+                if not wait_enabled(6):
+                    # A caixa autocompleta pode só registrar a escolha pelo teclado.
+                    typing = tab.locator("#dropdownPerfil input:visible")
+                    if typing.count():
+                        typing.first.focus()
+                        typing.first.press("ArrowDown")
+                        typing.first.press("Enter")
+                        steps.append("teclado_seta_enter")
+                    if not wait_enabled(4) and visible.count():
+                        visible.first.dispatch_event("mousedown")
+                        visible.first.dispatch_event("mouseup")
+                        visible.first.dispatch_event("click")
+                        steps.append("eventos_mouse")
+                enabled = wait_enabled(3)
+                steps.append(f"entrar_habilitado={enabled}")
+                if enter.count():
+                    target = (
+                        enter.first
+                        if enabled
+                        else tab.locator(".rodape-confirma").filter(visible=True).first
+                    )
+                    target.click(timeout=5_000, force=not enabled)
+                    steps.append("clicou_entrar" if enabled else "clicou_entrar_forcado")
+                tab.wait_for_timeout(2_500)
+                steps.append(f"saiu_da_tela={'alterar-perfil' not in tab.url}")
+            with contextlib.suppress(Exception):
+                self.diagnostics_dir.mkdir(parents=True, exist_ok=True)
+                (
+                    self.diagnostics_dir
+                    / f"portal-perfil-passos-{time.strftime('%Y%m%d-%H%M%S')}.txt"
+                ).write_text("\n".join(steps), encoding="utf-8")
+            if "alterar-perfil" not in tab.url:
+                return
+
+        option = visible_lawyer()
+        if option is None:
+            # A opção só aparece depois de abrir a lista de perfis (vídeo do operador).
+            trigger = tab.locator(
+                "p-dropdown:visible, .p-dropdown:visible, [role=combobox]:visible, "
+                "mat-select:visible, .ng-select:visible, .dropdown-toggle:visible, "
+                "button:has-text('Perfil'):visible, [aria-haspopup]:visible"
+            )
+            with contextlib.suppress(Exception):
+                if trigger.count():
+                    trigger.first.click(timeout=5_000)
+                    tab.wait_for_timeout(800)
+            option = visible_lawyer()
+        with contextlib.suppress(Exception):
+            if option is not None:
+                option.click(timeout=5_000)
+        confirm = tab.get_by_role(
+            "button", name=re.compile(r"Confirmar|Selecionar|Continuar|Entrar|Acessar|Ok", re.I)
+        )
+        with contextlib.suppress(Exception):
+            if confirm.count():
+                confirm.first.click(timeout=5_000)
+        tab.wait_for_timeout(2_000)
 
     @staticmethod
     def _portal_tab(context: BrowserContext) -> Page | None:

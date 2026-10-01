@@ -58,13 +58,14 @@ def build_auth_message(
 
 def build_approval_message(endpoint: SourceEndpoint, correlation_id: str) -> NotificationMessage:
     return NotificationMessage(
-        title=f"[LCF Monitor] Aprove o login no celular: {endpoint.key}",
+        title=f"[LCF Monitor] Login esperando você: {endpoint.key}",
         body=(
             f"O robô está entrando em {_label(endpoint)} com o certificado do token USB e a "
-            "tela está aguardando a confirmação.\n\n"
-            "Se chegou um pedido de 2FA no seu celular, aprove agora. Se o sistema pedir PIN "
-            "do token, alguém precisa digitá-lo no Mac mini.\n\n"
-            "O robô espera até 10 minutos e segue sozinho após a aprovação."
+            "tela do Mac mini está aguardando a confirmação.\n\n"
+            "Pelo Parsec (computador ou celular): clique OK na escolha do certificado e, se "
+            "pedir, digite o PIN do token. Se chegou um pedido de 2FA no celular, aprove.\n\n"
+            "Os sites com login rodam um de cada vez: só esta janela está aberta agora. "
+            "O robô espera até 10 minutos e segue sozinho para o próximo site."
         ),
         correlation_id=correlation_id,
         demo_only=False,

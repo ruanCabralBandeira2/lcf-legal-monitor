@@ -2,10 +2,18 @@
 
 Atualizado em 30/09/2026 (noite, Mac mini). Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
 
-## ▶ Retomada (30/09/2026, noite): operação migrada para o Mac mini
+## ▶ Retomada (01/10/2026, madrugada): login sem intervenção diária (ADR-011)
+
+- **Chrome do robô sempre aberto** (`chrome-robo`, página "NÃO FECHE"): os robôs se conectam a ele em 127.0.0.1:9222. O PIN do token é digitado uma vez após ligar o Mac (aviso por e-mail; `chrome-robo-desbloquear`).
+- **Certificado escolhido sozinho:** política do Chrome `AutoSelectCertificateForUrls` (`ops/macos/certificado-automatico.sh ativar|desativar|status`), só `tjrj.jus.br`, `jfrj.jus.br`, `trf2.jus.br` e emissor AC OAB G3.
+- **Portal:** perfil "Advogado" escolhido sozinho; validado sem PIN e sem clique.
+- **Pendências do operador (uma vez):** PJeOffice → "Apenas no primeiro acesso (com confirmação)"; `auth-open eproc-jfrj-1g` e `auth-open eproc-trf2` marcando "Não usar o 2FA neste dispositivo e navegador".
+- **Robustez:** salvar só cookies no modo CDP; tempo máximo de 90 min por rodada; sequência de login com um processo por site.
+
+## Retomada (30/09/2026, noite): operação migrada para o Mac mini
 
 - **O Mac mini (M4) é o servidor.** Projeto em `~/lcf-legal-monitor`, branch `claude/m4-rota-email-sessao`, versão 0.8.0. Banco restaurado do dump do Windows; robôs do Windows removidos pelo operador. Detalhes e pendências em `docs/runbooks/MIGRACAO_MAC.md`.
-- **Agendamento:** `ops/launchd/registrar-robos.sh` (LaunchAgents por site + `caffeinate`). Pedido do operador: todos os robôs na mesma hora (eproc no minuto 0 de cada hora; PJe e Portal às 06:00 e 18:00). O script já está nessa forma, mas o launchd ainda tem a agenda escalonada anterior (sem o Portal) até o teste conjunto.
+- **Agendamento (ativo):** `ops/launchd/registrar-robos.sh` + `caffeinate`. eproc: de hora em hora no minuto 0, sem janela. Sites com login (PJe TJRJ 1g/2g e Portal): um único robô `janela-login` (`monitor-sequencia`) às 13:00 e 00:00, um site por vez, para o login caber no Parsec do celular. TRT1 fica fora da sequência até existir o leitor do PJe-KZ.
 - **Portal de Serviços do TJRJ (44 processos de numeração antiga): concluído no núcleo.** Conector `tjrj_portal` (ADR-010): 44/44 lidos, 3.737 movimentações desde a distribuição; login dentro da rodada; "Sim" automático só no aviso de prolongar sessão; download de peça validado com ato assinado real (`fetch-latest <CNJ> --source tjrj-portal --com-peca --operador`).
 - **Token no Mac:** SafeSign (tokenadmin) + Chrome para eproc e Portal; PJeOffice Pro para o PJe. O PIN fica em cache após a 1ª digitação (até reiniciar) — não foi preciso guardar PIN. Para o Portal rodar sem ninguém falta só a escolha do certificado (`AutoSelectCertificateForUrls`, decisão do titular).
 - **PJe TJRJ:** 3 de 5 ok. Os outros 2 abrem o aviso da Resolução CNJ (advogado não é parte); o robô recusa e o operador pediu para ignorá-los por enquanto.

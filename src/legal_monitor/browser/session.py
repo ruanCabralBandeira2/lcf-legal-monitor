@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import time
@@ -63,6 +64,18 @@ def _login_refusal(page: Page) -> str:
     return ""
 
 
+def minimize_window(page: Any) -> None:
+    """Minimiza a janela da página no Chrome do robô (não pula na tela de quem usa o Mac)."""
+    with contextlib.suppress(Exception):
+        session = page.context.new_cdp_session(page)
+        window = session.send("Browser.getWindowForTarget")
+        session.send(
+            "Browser.setWindowBounds",
+            {"windowId": window["windowId"], "bounds": {"windowState": "minimized"}},
+        )
+        session.detach()
+
+
 def _host_path(url: str) -> str:
     parsed = urlparse(url)
     return f"{parsed.hostname or ''}{parsed.path}"
@@ -121,8 +134,14 @@ class BrowserSessionManager:
         headless: bool = True,
         channel: str = "",
         visible_for_blocked: bool = False,
+        cdp_url: str = "",
+        minimize: bool = True,
     ) -> None:
         self._root = profile_root.resolve()
+        # Chrome do robô sempre aberto (ideia A): conectar em vez de abrir um Chrome novo,
+        # porque o macOS guarda o PIN do token por processo do Chrome.
+        self._cdp_url = cdp_url
+        self._minimize = minimize
         self._headless = headless
         # Autorizado pelo operador em 28/09/2026: fontes que recusam headless usam janela
         # visível do navegador comum. Nunca técnicas antifingerprint ou de evasão.
@@ -145,7 +164,11 @@ class BrowserSessionManager:
 
     @contextlib.contextmanager
     def context(
-        self, endpoint: SourceEndpoint, *, headless: bool | None = None
+        self,
+        endpoint: SourceEndpoint,
+        *,
+        headless: bool | None = None,
+        minimize: bool | None = None,
     ) -> Iterator[BrowserContext]:
         try:
             from playwright.sync_api import sync_playwright
@@ -156,19 +179,27 @@ class BrowserSessionManager:
             ) from None
         state_path = self.state_path(endpoint)
         state_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        options: dict[str, Any] = {
+            "locale": "pt-BR",
+            "timezone_id": "America/Sao_Paulo",
+            "accept_downloads": True,
+        }
+        if state_path.is_file():
+            options["storage_state"] = str(state_path)
         with sync_playwright() as playwright:
+            if self._cdp_url:
+                yield from self._cdp_context(
+                    playwright,
+                    options,
+                    state_path,
+                    self._minimize if minimize is None else minimize,
+                )
+                return
             launch: dict[str, Any] = {"headless": self._headless if headless is None else headless}
             if self._channel:
                 launch["channel"] = self._channel
             browser = playwright.chromium.launch(**launch)
             try:
-                options: dict[str, Any] = {
-                    "locale": "pt-BR",
-                    "timezone_id": "America/Sao_Paulo",
-                    "accept_downloads": True,
-                }
-                if state_path.is_file():
-                    options["storage_state"] = str(state_path)
                 context = browser.new_context(**options)
                 context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
                 try:
@@ -185,6 +216,29 @@ class BrowserSessionManager:
                     with contextlib.suppress(PlaywrightError):
                         browser.close()
 
+    def _cdp_context(
+        self, playwright: Any, options: dict[str, Any], state_path: Path, minimize: bool
+    ) -> Iterator[BrowserContext]:
+        """Contexto isolado (cookies próprios) dentro do Chrome do robô já aberto. Só o
+        contexto é fechado no fim: o Chrome continua aberto com o token desbloqueado."""
+        try:
+            browser = playwright.chromium.connect_over_cdp(self._cdp_url, timeout=15_000)
+        except PlaywrightError as exc:
+            raise BrowserUnavailableError(
+                "Chrome do robô não está aberto (ops/launchd/registrar-robos.sh)"
+            ) from exc
+        context = browser.new_context(**options)
+        context.set_default_navigation_timeout(NAVIGATION_TIMEOUT_MS)
+        if minimize:
+            context.on("page", minimize_window)
+        try:
+            yield context
+        finally:
+            if browser.is_connected():
+                self._save_state(context, state_path, cookies_only=True)
+                with contextlib.suppress(PlaywrightError):
+                    context.close()
+
     def login(
         self,
         endpoint: SourceEndpoint,
@@ -194,6 +248,7 @@ class BrowserSessionManager:
         timeout_seconds: int = 600,
         notify_after_seconds: int = 20,
         poll_seconds: float = 3.0,
+        visible: bool = True,
     ) -> SessionCheck:
         """Login em janela visível pela opção oficial de certificado (token USB).
 
@@ -201,7 +256,8 @@ class BrowserSessionManager:
         PIN do token e aprovação do 2FA no celular ficam com a pessoa. Se a sessão não ficar
         válida em `notify_after_seconds`, `on_waiting_approval` é chamado uma única vez.
         """
-        with self.context(endpoint, headless=False) as context:
+        # Login com gente (2FA, "Não usar o 2FA neste dispositivo") precisa da janela à vista.
+        with self.context(endpoint, headless=False, minimize=not visible) as context:
             # Cookies de "login em andamento" de tentativas interrompidas fazem o SSO
             # recusar a próxima tentativa. A sessão já estabelecida (KEYCLOAK_IDENTITY,
             # cookies do eproc) é preservada.
@@ -333,10 +389,24 @@ class BrowserSessionManager:
         return SessionCheck(endpoint.key, state, urlparse(final_url).hostname or "")
 
     @staticmethod
-    def _save_state(context: BrowserContext, state_path: Path) -> None:
+    def _save_state(
+        context: BrowserContext, state_path: Path, *, cookies_only: bool = False
+    ) -> None:
         temporary = state_path.with_suffix(".tmp")
         try:
-            context.storage_state(path=str(temporary))
+            if cookies_only:
+                # Chrome do robô (CDP): storage_state() ficou preso para sempre em 01/10/2026
+                # (TRF2/TRF4). Cookies bastam para as sessões e para o "Não usar o 2FA neste
+                # dispositivo"; o localStorage salvo antes é preservado.
+                origins: list[Any] = []
+                with contextlib.suppress(OSError, ValueError):
+                    origins = json.loads(state_path.read_text(encoding="utf-8")).get("origins", [])
+                temporary.write_text(
+                    json.dumps({"cookies": context.cookies(), "origins": origins}),
+                    encoding="utf-8",
+                )
+            else:
+                context.storage_state(path=str(temporary))
         except PlaywrightError:
             return  # navegador já fechado: mantém o último estado salvo
         os.chmod(temporary, 0o600)

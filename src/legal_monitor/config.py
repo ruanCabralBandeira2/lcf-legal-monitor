@@ -88,6 +88,13 @@ class Settings:
     browser_headless: bool = True
     browser_channel: str = "chrome"
     browser_visible_for_blocked: bool = False
+    # Chrome do robô sempre aberto (ideia A, 30/09/2026): o PIN do token vale por processo do
+    # Chrome; com um único Chrome aberto, a pessoa digita o PIN uma vez após ligar o Mac.
+    browser_cdp_url: str = ""
+    browser_minimize: bool = True
+    # Com seleção automática do certificado (política do Chrome) e PIN em cache, os robôs
+    # sem janela de login (eproc de hora em hora) podem refazer o login sozinhos.
+    auto_cert_login: bool = False
 
     @classmethod
     def from_env(
@@ -205,6 +212,9 @@ class Settings:
             browser_headless=_parse_bool(merged.get("BROWSER_HEADLESS"), default=True),
             browser_channel=merged.get("BROWSER_CHANNEL", "chrome").strip(),
             browser_visible_for_blocked=_parse_bool(merged.get("BROWSER_VISIBLE_FOR_BLOCKED")),
+            browser_cdp_url=merged.get("BROWSER_CDP_URL", "").strip(),
+            browser_minimize=_parse_bool(merged.get("BROWSER_MINIMIZE"), default=True),
+            auto_cert_login=_parse_bool(merged.get("AUTO_CERT_LOGIN")),
         )
         settings.validate()
         return settings
@@ -251,6 +261,11 @@ class Settings:
                 raise ConfigError("EMAIL_ENABLED exige EMAIL_LAWYER_TO ou EMAIL_OPERATOR_TO")
         if self.browser_channel not in ("", "chrome", "chrome-beta", "msedge"):
             raise ConfigError("BROWSER_CHANNEL deve ser vazio, chrome, chrome-beta ou msedge")
+        if self.browser_cdp_url:
+            parsed = urlparse(self.browser_cdp_url)
+            if parsed.scheme != "http" or parsed.hostname not in ("127.0.0.1", "localhost"):
+                # O Chrome do robô tem o token desbloqueado: nunca aceitar conexão de fora.
+                raise ConfigError("BROWSER_CDP_URL deve ser http://127.0.0.1:<porta>")
         if self.browser_profile_dir in (self.storage_dir, self.temp_dir):
             raise ConfigError("BROWSER_PROFILE_DIR precisa ser separado dos documentos")
 

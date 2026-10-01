@@ -10,8 +10,8 @@ Carteira exportada do Astrea em `storage/carteira/` (fora do Git): 119 linhas, 1
 |---|---:|---|---|---|---|
 | `eproc-jfrj-1g` (Justiça Federal RJ) | 61 | OAB + senha + 2FA | a medir | de hora em hora | eproc (validar 1º uso) |
 | `eproc-tjrj-1g` | 44 → 0 (não estão no eproc) | token (SSO Jus.br) | ~10 h | de hora em hora | eproc (validado) |
-| `tjrj-portal` (processo eletrônico legado do TJRJ) | 44 (numeração antiga) | token (certificado no IdServerJus; escolha do certificado no Chrome) | só na aba (login a cada rodada) | 06:00 e 18:00 | `tjrj_portal` (validado 44/44, ADR-010) |
-| `pje-tjrj-1g` | 5 | token + PIN | ~15 min | 06:00 e 18:00 | PJe (validado) |
+| `tjrj-portal` (processo eletrônico legado do TJRJ) | 44 (numeração antiga) | token (certificado no IdServerJus; escolha do certificado no Chrome) | só na aba (login a cada rodada) | 13:00 e 00:00 (sequência) | `tjrj_portal` (validado 44/44, ADR-010) |
+| `pje-tjrj-1g` | 5 | token + PIN | ~15 min | 13:00 e 00:00 (sequência) | PJe (validado) |
 | `pje-trt1-1g` (Trabalho) | 5 | login próprio | a medir | 06:20 e 18:20 | PJe (validar) |
 | `eproc-tjrj-2g` | 1 | token (SSO Jus.br) | ~10 h | de hora em hora | eproc |
 | `eproc-trf2` | 1 | OAB + senha + 2FA | a medir | de hora em hora | eproc |

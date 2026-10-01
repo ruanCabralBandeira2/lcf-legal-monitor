@@ -69,6 +69,7 @@ def movement_from_item(
 
 
 LOOKUP_RETRY = timedelta(hours=24)
+AUTO_LOGIN_TIMEOUT_SECONDS = 150
 MAX_DISCOVERY_SHORT_SESSION = 8
 MAX_INDIVIDUAL_ALERTS = 10
 BURST_DOCUMENT_MOVEMENTS = 3
@@ -180,8 +181,10 @@ class MonitorService:
         max_attachment_bytes: int,
         notify_initial: bool = False,
         interactive_login: bool = True,
+        auto_cert_login: bool = False,
     ) -> None:
         self._interactive_login = interactive_login
+        self._auto_cert_login = auto_cert_login
         self._repo = repository
         self._sessions = sessions
         self._documents = documents
@@ -308,6 +311,23 @@ class MonitorService:
 
     def _ensure_session(self, endpoint: SourceEndpoint) -> SessionState:
         state = self._sessions.check(endpoint).state
+        has_certificate = bool(
+            endpoint.certificate_login_selector or endpoint.certificate_login_label
+        )
+        if state is not SessionState.VALID and not self._interactive_login:
+            if self._auto_cert_login and has_certificate:
+                # Certificado escolhido pela política do Chrome e PIN em cache no Chrome do
+                # robô: refaz o login sem ninguém. Se pedir algo humano (2FA), desiste rápido
+                # e o aviso de sempre vai ao operador.
+                LOGGER.info("Sessão %s caiu; login automático pelo certificado", endpoint.key)
+                return self._sessions.login(
+                    endpoint,
+                    click_certificate=True,
+                    on_waiting_approval=lambda: None,
+                    timeout_seconds=AUTO_LOGIN_TIMEOUT_SECONDS,
+                    visible=False,
+                ).state
+            return state
         if state is SessionState.VALID or not self._interactive_login:
             # Sem login interativo (robôs de hora em hora): só avisa; a pessoa roda auth-open.
             return state

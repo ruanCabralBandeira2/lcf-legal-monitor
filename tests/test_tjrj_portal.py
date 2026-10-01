@@ -323,3 +323,88 @@ class PdfViewerResponseTests(unittest.TestCase):
         self.assertEqual(_pdf_from_response(ViewerResponse(), context), pdf)
         self.assertEqual(context.request.urls, [ViewerResponse.url])
         self.assertIsNone(_pdf_from_response(ViewerResponse()))
+
+
+_PROFILE_PAGE = """<html><body>
+<p>Selecione o perfil de acesso</p>
+<button id="abrir" aria-haspopup="listbox"
+  onclick="document.getElementById('lista').style.display='block'">Selecione</button>
+<ul id="lista" role="listbox" style="display:none">
+  <li role="option" onclick="document.body.dataset.perfil='servidor'">Servidor</li>
+  <li role="option" onclick="document.body.dataset.perfil='advogado'">Advogado</li>
+</ul>
+<button onclick="document.body.dataset.ok=document.body.dataset.perfil">Confirmar</button>
+</body></html>"""
+
+
+@unittest.skipUnless(Path(CHROME).exists(), "Google Chrome ausente")
+class PortalProfileBrowserTests(unittest.TestCase):
+    def test_opens_list_then_picks_lawyer_and_confirms(self) -> None:
+        def run() -> object:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(_PROFILE_PAGE)
+                    connector = TjrjPortalConnector(CATALOG["tjrj-portal"])
+                    with tempfile.TemporaryDirectory() as folder:
+                        connector.diagnostics_dir = Path(folder)
+                        connector._choose_lawyer_profile(page, dump=True)
+                    return page.evaluate("document.body.dataset.ok")
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual(pool.submit(run).result(timeout=120), "advogado")
+
+
+# Cópia da estrutura real da tela "Trocar perfil" do Portal (gravada em 30/09/2026).
+_TROCAR_PERFIL = """<html><body>
+<div class="modal fade" style="display:none"><div class="modal-footer">
+  <a role="button" onclick="document.body.dataset.ok='janela-escondida'">
+  <div class="rodape-confirma">Confirmar</div></a></div></div>
+<app-trocar-perfil><div class="modal-content">
+<div class="modal-body"><app-dropdown id="dropdownPerfil">
+<label class="control-label">Perfil</label>
+<div class="select-autocomplete">
+  <div class="form-inline ajustado-form"><input type="text" placeholder="Selecione"
+    onclick="document.querySelector('.box-resultados').style.display='block'"></div>
+  <div class="box-resultados" style="display:none"><ul>
+    <li onclick="escolher('Servidor')">Servidor</li>
+    <li onclick="escolher('Advogado')">Advogado</li></ul></div>
+</div></app-dropdown></div>
+<div class="modal-footer">
+  <a id="entrar" class="isDisabled" role="button" href="javascript:void(0)"
+     onclick="if (!this.classList.contains('isDisabled'))
+       document.body.dataset.ok = document.body.dataset.perfil">
+     <div class="rodape-confirma">Entrar</div></a>
+  <a class="isDisabled" role="button"><div class="rodape-cancela">Cancelar</div></a>
+</div></div></app-trocar-perfil>
+<script>function escolher(p){ document.body.dataset.perfil=p;
+  document.getElementById('entrar').classList.remove('isDisabled'); }</script>
+</body></html>"""
+
+
+@unittest.skipUnless(Path(CHROME).exists(), "Google Chrome ausente")
+class PortalTrocarPerfilBrowserTests(unittest.TestCase):
+    def test_real_structure_box_lawyer_then_green_enter(self) -> None:
+        def run() -> object:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(_TROCAR_PERFIL)
+                    connector = TjrjPortalConnector(CATALOG["tjrj-portal"])
+                    with tempfile.TemporaryDirectory() as folder:
+                        connector.diagnostics_dir = Path(folder)
+                        connector._choose_lawyer_profile(page)
+                    return page.evaluate("document.body.dataset.ok")
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            self.assertEqual(pool.submit(run).result(timeout=120), "Advogado")

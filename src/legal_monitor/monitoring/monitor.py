@@ -23,6 +23,7 @@ from legal_monitor.connectors.routing import (
     candidate_keys,
     candidate_sources,
 )
+from legal_monitor.connectors.tjrj_portal import TjrjPortalConnector
 from legal_monitor.documents.service import DocumentService, DocumentValidationError
 from legal_monitor.domain.enums import ErrorCode, SessionState, SourceSystem
 from legal_monitor.domain.models import DocumentRecord, Movement, ProcessRef
@@ -32,6 +33,13 @@ from legal_monitor.notifications.base import NotificationMessage, Notifier
 
 LOGGER = logging.getLogger(__name__)
 MAX_DOCUMENTS_PER_MOVEMENT = 5
+# Motivos de "sem PDF", mostrados no e-mail e no log da rodada.
+MISSING_COMMUNICATION = (
+    "intimação/citação: o robô não abre esses documentos (risco de registrar ciência); "
+    "consulte no sistema"
+)
+MISSING_NO_LINK = "a movimentação não tem documento na linha do tempo"
+MISSING_DOWNLOAD_FAILED = "o documento existe, mas o download falhou"
 BASELINE_LINES_PER_EMAIL = 40
 
 
@@ -95,8 +103,13 @@ def dump_structure(page: Any, target: Path) -> Path:
     return EprocConnector.dump_structure(page, target)
 
 
-def connector_for(endpoint: SourceEndpoint) -> PjeConnector | EprocConnector | None:
+Connector = PjeConnector | EprocConnector | TjrjPortalConnector
+
+
+def connector_for(endpoint: SourceEndpoint) -> Connector | None:
     """Um "robô" por família de sistema; cada site do catálogo usa o seu."""
+    if endpoint.key == "tjrj-portal":
+        return TjrjPortalConnector(endpoint)
     if endpoint.system is SourceSystem.PJE:
         return PjeConnector(endpoint)
     if endpoint.system is SourceSystem.EPROC:
@@ -114,9 +127,12 @@ class ProcessOutcome:
     emails: int = 0
     first_run: bool = False
     detail: str = ""
+    missing_documents: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
-        return self.__dict__.copy()
+        data = self.__dict__.copy()
+        data["missing_documents"] = list(self.missing_documents)
+        return data
 
 
 @dataclass
@@ -170,7 +186,7 @@ class MonitorService:
         self._notify_initial = notify_initial
         self._baseline: list[tuple[MonitoredProcess, TimelineItem]] = []
 
-    def run(self, *, site: str | None = None) -> RunSummary:
+    def run(self, *, site: str | None = None, max_processes: int | None = None) -> RunSummary:
         """Rodada completa; com `site`, só aquele site (um robô por site, agendas próprias)."""
         summary = RunSummary(started_at=datetime.now(UTC))
         self._baseline = []
@@ -208,6 +224,8 @@ class MonitorService:
             ]
             if endpoint.headless_blocked:
                 group = limit_discovery(group, key)
+            if max_processes is not None:
+                group = group[:max_processes]
             if not group:
                 continue
             touched.update(p.id for p in group)
@@ -215,7 +233,13 @@ class MonitorService:
                 for p in group:
                     outcomes[p.id].detail = f"{key}: conector ainda não implementado"
                 continue
-            state = self._ensure_session(endpoint)
+            if getattr(connector_for(endpoint), "login_per_run", False):
+                # Portal do TJRJ: a sessão vive na aba; o login acontece dentro da rodada.
+                state = (
+                    SessionState.VALID if self._interactive_login else SessionState.AUTH_REQUIRED
+                )
+            else:
+                state = self._ensure_session(endpoint)
             summary.sessions[key] = state.value
             if state is not SessionState.VALID:
                 self._on_auth_problem(endpoint, state)
@@ -284,9 +308,21 @@ class MonitorService:
         connector = connector_for(endpoint)
         assert connector is not None  # garantido por run()
         found: set[uuid.UUID] = set()
-        with self._sessions.context(
-            endpoint, headless=self._sessions.headless_for(endpoint)
-        ) as context:
+        login_per_run = getattr(connector, "login_per_run", False)
+        headless = False if login_per_run else self._sessions.headless_for(endpoint)
+        with self._sessions.context(endpoint, headless=headless) as context:
+            if login_per_run and not connector.login(
+                context, on_waiting=lambda: self._on_waiting(endpoint)
+            ):
+                self._on_auth_problem(endpoint, SessionState.AUTH_REQUIRED)
+                for process in group:
+                    outcomes[process.id].status = "AUTH_REQUIRED"
+                    outcomes[process.id].detail = f"{endpoint.key}: login não concluído"
+                    with contextlib.suppress(Exception):
+                        self._repo.mark_checked(
+                            process.id, status="AUTH_REQUIRED", at=datetime.now(UTC), success=False
+                        )
+                return found
             for process in group:
                 outcome = outcomes[process.id]
                 try:
@@ -355,7 +391,7 @@ class MonitorService:
     def _process_autos(
         self,
         context: Any,
-        connector: PjeConnector | EprocConnector,
+        connector: Connector,
         autos: Any,
         endpoint: SourceEndpoint,
         process: MonitoredProcess,
@@ -394,7 +430,11 @@ class MonitorService:
             outcome.new_movements += 0 if outcome.first_run else 1
             if id(item) not in to_notify:
                 continue
-            records = self._download_all(context, connector, autos, endpoint, process, item)
+            records, missing = self._download_all(
+                context, connector, autos, endpoint, process, item
+            )
+            if missing:
+                outcome.missing_documents.append(missing)
             for source_ref, record in records:
                 self._repo.insert_document(movement_id, source_ref, record)
             outcome.documents += len(records)
@@ -412,6 +452,7 @@ class MonitorService:
                     initial=outcome.first_run,
                     extra_documents=max(len(records) - 1, 0),
                     restricted=restricted,
+                    missing_reason=missing,
                 )
                 self._notifier.send(message)
                 outcome.emails += 1
@@ -454,16 +495,20 @@ class MonitorService:
     def _download_all(
         self,
         context: Any,
-        connector: PjeConnector | EprocConnector,
+        connector: Connector,
         autos: Any,
         endpoint: SourceEndpoint,
         process: MonitoredProcess,
         item: TimelineItem,
-    ) -> list[tuple[str, DocumentRecord]]:
+    ) -> tuple[list[tuple[str, DocumentRecord]], str | None]:
+        """Baixa os PDFs da movimentação. Sem nenhum PDF, devolve também o motivo legível."""
         records: list[tuple[str, DocumentRecord]] = []
         if not item.documents_allowed:
             LOGGER.info("Documentos de intimação/citação não são abertos (risco de ciência)")
-            return records
+            return records, MISSING_COMMUNICATION
+        if not item.documents:
+            return records, getattr(connector, "no_documents_reason", None) or MISSING_NO_LINK
+        failures: list[str] = []
         for document in item.documents[:MAX_DOCUMENTS_PER_MOVEMENT]:
             with tempfile.TemporaryDirectory(prefix="lcf-monitor-") as temporary:
                 try:
@@ -480,6 +525,11 @@ class MonitorService:
                     )
                 except (ConnectorError, DocumentValidationError) as exc:
                     LOGGER.warning("Documento não obtido: %s", exc)
+                    failures.append(str(exc)[:120])
                     continue
             records.append((document.document_id or document.tag, record))
-        return records
+        if records:
+            return records, None
+        if failures:
+            return records, f"{MISSING_DOWNLOAD_FAILED} ({failures[0]})"
+        return records, MISSING_NO_LINK

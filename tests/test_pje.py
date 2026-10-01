@@ -8,6 +8,8 @@ from legal_monitor.connectors.pje import (
     BRASILIA,
     FORBIDDEN_CONTROL,
     PjeConnector,
+    _dialog_notice,
+    _record_dialog,
     items_from_payload,
     parse_pje_date,
 )
@@ -15,6 +17,11 @@ from legal_monitor.connectors.routing import CATALOG
 from legal_monitor.domain.cnj import CnjNumber
 from legal_monitor.domain.models import DocumentRecord
 from legal_monitor.monitoring.latest import build_movement_message
+from legal_monitor.monitoring.monitor import (
+    MISSING_COMMUNICATION,
+    MISSING_NO_LINK,
+    MonitorService,
+)
 
 CNJ = CnjNumber.from_components(sequence=1, year=2026, justice=8, tribunal=19, origin=1)
 
@@ -73,6 +80,28 @@ class PjeParsingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             PjeConnector(CATALOG["eproc-tjrj-1g"])
 
+    def test_dialog_is_dismissed_and_recorded_without_numbers(self) -> None:
+        class FakeDialog:
+            type = "confirm"
+            message = "Processo 0001234-56.2025.8.19.0001\n em segredo. Deseja continuar?"
+            dismissed = False
+            accepted = False
+
+            def dismiss(self) -> None:
+                self.dismissed = True
+
+            def accept(self) -> None:
+                self.accepted = True
+
+        dialog = FakeDialog()
+        dialogs: list[str] = []
+        _record_dialog(dialogs, dialog)
+        self.assertTrue(dialog.dismissed)
+        self.assertFalse(dialog.accepted)
+        self.assertEqual(dialogs, ["confirm: Processo N-56.N.8.19.N em segredo. Deseja continuar?"])
+        self.assertIn("caixa do navegador recusada: confirm:", _dialog_notice(dialogs))
+        self.assertEqual(_dialog_notice([]), "")
+
 
 class MovementMessageTests(unittest.TestCase):
     def test_message_with_attachment_and_warning(self) -> None:
@@ -98,6 +127,40 @@ class MovementMessageTests(unittest.TestCase):
         ]
         short = build_movement_message(CNJ, CATALOG["pje-tjrj-1g"], long_item, None, attached=False)
         self.assertLessEqual(len(short.render_text()), 2000)
+
+    def test_message_without_pdf_explains_why(self) -> None:
+        item = items_from_payload(
+            {"items": [{"date": "28 set. 2026", "text": "Intimação fictícia", "docs": []}]}
+        )[0]
+        message = build_movement_message(
+            CNJ,
+            CATALOG["pje-tjrj-1g"],
+            item,
+            None,
+            attached=False,
+            missing_reason=MISSING_COMMUNICATION,
+        )
+        self.assertIn("nenhum PDF obtido", message.body)
+        self.assertIn("motivo: intimação/citação", message.body)
+        self.assertEqual(message.attachments, ())
+
+    def test_download_reason_for_communication_and_missing_link(self) -> None:
+        payload = {
+            "items": [
+                {"date": "28 set. 2026", "text": "Expedição de intimação", "docs": []},
+                {"date": "28 set. 2026", "text": "Conclusos ao juiz", "docs": []},
+            ]
+        }
+        communication, no_link = items_from_payload(payload)
+        # Os dois caminhos retornam antes de tocar no navegador ou no armazenamento.
+        download = MonitorService._download_all
+        self.assertEqual(
+            download(None, None, None, None, None, None, communication),
+            ([], MISSING_COMMUNICATION),
+        )
+        self.assertEqual(
+            download(None, None, None, None, None, None, no_link), ([], MISSING_NO_LINK)
+        )
 
 
 if __name__ == "__main__":

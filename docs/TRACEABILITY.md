@@ -43,3 +43,9 @@
 | Aviso de banco fora do ar | `alert_database_down` em `legal_monitor.cli`, `tests/test_cli_database_alert.py` | implementado após 2 dias de rodadas falhando em silêncio (28-30/09/2026) |
 | Diagnóstico guiado do TJRJ legado | `diagnostico-tjrj` (consulta pública opcional; Portal com gravação guiada de rotas, endereços internos e iframe) | pronto; gravação guiada pendente no Mac |
 | Migração para o Mac mini | `docs/runbooks/MIGRACAO_MAC.md`, backup `storage/backups/` (fora do Git) | preparado em 30/09/2026 |
+| Conector Portal de Serviços TJRJ (legado) | `legal_monitor.connectors.tjrj_portal`, ADR-010, `tests/test_tjrj_portal.py` | 44/44 processos lidos em 30/09/2026 (3.737 movimentações); peças por "Ato Assinado"/"Ver Íntegra" testadas em página sintética |
+| Aviso de prolongar sessão (Portal) | `keep_session`, `_answer_browser_dialog` | "Sim" só para esse aviso; outras caixas recusadas (teste com Chrome real) |
+| Motivo de e-mail sem PDF | `MISSING_*` em `legal_monitor.monitoring.monitor`, `missing_reason` | e-mail e log da rodada dizem por que não há peça |
+| Caixa alert/confirm no PJe | `_record_dialog` em `legal_monitor.connectors.pje` | registrada (mascarada) e recusada; revelou 2 processos em que o advogado não é parte |
+| Trava por site e teste com poucos processos | `_run_lock` e `--max-processos` em `legal_monitor.cli` | duas rodadas do mesmo site não correm juntas |
+| Agendamento no Mac | `ops/launchd/registrar-robos.sh` (LaunchAgents + `caffeinate`) | registrado no Mac; agenda simultânea preparada, ativação após teste |

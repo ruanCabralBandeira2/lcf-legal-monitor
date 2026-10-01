@@ -61,6 +61,15 @@ Testes (os de navegador usam Edge e são pulados no Mac até ajustarmos o canal)
 TEST_DATABASE_URL=postgresql://legal_monitor:legal_monitor_dev@127.0.0.1:5432/legal_monitor .venv/bin/python -m pytest
 ```
 
+### Estado no Mac (30/09/2026)
+
+- Projeto em `~/lcf-legal-monitor`, branch `claude/m4-rota-email-sessao`, `.venv` Python 3.12.13, hooks ativos.
+- `.env` (com `BROWSER_CHANNEL=chrome`), carteira e dump copiados; banco restaurado (118 processos, migrações 001-006) e `sites-report` ok.
+- Testes PostgreSQL rodam num banco separado `legal_monitor_test` (nunca no banco operacional):
+  `TEST_DATABASE_URL=postgresql://legal_monitor:legal_monitor_dev@127.0.0.1:5432/legal_monitor_test .venv/bin/python -m pytest` - todos aprovados; Ruff ok.
+- Um container antigo de demonstração (`lcfadvogados-postgres-1`, de `~/Documents/ChatGPT/LCF ADVOGADOS`, só dados fictícios de agosto) foi parado e teve o reinício automático desligado; o volume foi preservado.
+- Faltam (ação humana): instalar Google Chrome; instalar o middleware do token G&D StarSign CUT S (`security list-smartcards` ainda não enxerga o cartão); ligar "Start Docker Desktop when you sign in"; `secret-set smtp` + `email-test`; remover os robôs do Windows; logins da seção 3.
+
 ## 3. Logins no Mac (token USB no Mac; PIN e 2FA sempre humanos)
 
 ```bash
@@ -74,14 +83,14 @@ PJe TJRJ e Portal de Serviços do TJRJ **não guardam sessão**: o login acontec
 
 ## 4. Onde paramos (pendências em ordem de prioridade)
 
-1. **Portal de Serviços do TJRJ (44 processos de numeração antiga)** — login por certificado funciona (imagem `user-card`), a consulta fica em `portalservicos/#/consproc/consultaportal` e roda **dentro de um iframe**; a sessão não persiste (login a cada rodada, como o PJe). Falta a **gravação guiada**: `legal-monitor diagnostico-tjrj <CNJ de um processo de numeração antiga do TJRJ, da carteira>` (o operador escolhe um da carteira em `storage/carteira/`; nunca registrar o número no Git) → a pessoa navega (Consultas → Consultas Processuais → pesquisa → abre o processo) e só aperta Enter com as movimentações **visíveis**; o robô grava rotas, endereços internos (mascarados) e a estrutura do quadro. Com isso, construir o conector `tjrj-portal`.
+1. **Portal de Serviços do TJRJ (44)** — **feito em 30/09/2026** (ADR-010): 44/44 lidos. Falta validar o download de peça na primeira novidade real e decidir a seleção automática do certificado (`AutoSelectCertificateForUrls`) para rodar sem ninguém.
 2. **TRF2 (1 processo)** — o robô grava 50 eventos (1 a 50, último em 08/07/2020). Perguntar ao operador qual é o último evento no eproc do TRF2. Se houver mais de 50, o carregamento sob demanda (`#carregarNovosEventos`) não está sendo disparado pela rolagem.
-3. **PJe TJRJ (5)** — 3 com histórico; 2 falharam no 1º uso (autos não abriram em 45 s; página lida em branco). Correções aplicadas (espera de 90 s e da linha do tempo): revalidar.
+3. **PJe TJRJ (5)** — 3 com histórico. Os outros 2 mostram o aviso da Resolução CNJ "advogado não faz parte": o robô recusa; o operador pediu para ignorá-los por enquanto (habilitar o advogado ou desativar com `admin-deactivate-process`).
 4. **JFRJ (61)** — login OAB + senha + 2FA do titular e depois `monitor-run --site eproc-jfrj-1g`.
 5. **TRT1 (5)** — PJe-KZ (Angular), SSO Jus.br, exige janela visível; a tela antiga de consulta cai em `error.seam`: construir conector próprio do PJe-KZ.
 6. **TRF4 (1)** — titular sem cadastro no eproc do TRF4 ("Invalid user"): credenciamento ou outro advogado.
 7. **Agravo do TJRJ 2º grau** — não está no eproc 2g: próximo candidato Portal/PJe 2g.
-8. **Agendamento no Mac** — criar o equivalente de `ops/windows/registrar-robos.ps1` com launchd (**LaunchAgent**, sessão do usuário: janela visível e token): eproc de hora em hora com `--no-interactive-login`; PJe/Portal em janelas fixas (ex.: 06:00 e 18:00) com PIN remoto. Manter o Mac sem suspender.
+8. **Agendamento no Mac** — `ops/launchd/registrar-robos.sh` (LaunchAgents por site, mesma agenda do Windows, mais `caffeinate` para o Mac não suspender). `--so-acordado` registra só o anti-suspensão; `--remover` remove tudo; `LCF_TESTE=<pasta>` só gera e valida os `.plist`. Registrar **depois** de remover os robôs do Windows e fazer os logins.
 9. Depois: Discord/telefone, abrir PR do branch para `main` após validação.
 
 ## 5. Regras que não mudam

@@ -1,0 +1,196 @@
+from __future__ import annotations
+
+import shutil
+import tempfile
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+from legal_monitor.connectors.routing import CATALOG
+from legal_monitor.connectors.tjrj_portal import (
+    TjrjPortalConnector,
+    _answer_browser_dialog,
+    is_session_prompt,
+    item_from_card,
+    keep_session,
+)
+from legal_monitor.monitoring.monitor import connector_for
+
+CHROME = "/Applications/Google Chrome.app"
+
+
+class PortalCardTests(unittest.TestCase):
+    def test_card_with_date_and_description(self) -> None:
+        item = item_from_card(
+            {
+                "type": "Ato Ordinatório Praticado",
+                "fields": [["Data", "23/09/2026"], ["Descrição", "Ao perito (texto fictício)"]],
+            }
+        )
+        assert item is not None
+        self.assertEqual(item.date_text, "23/09/2026")
+        self.assertEqual(
+            item.text, "Ato Ordinatório Praticado | Descrição: Ao perito (texto fictício)"
+        )
+        self.assertEqual(item.event_date.year, 2026)
+
+    def test_card_with_only_a_named_date(self) -> None:
+        item = item_from_card(
+            {"type": "Envio de Documento Eletrônico", "fields": [["Data da remessa", "24/07/2026"]]}
+        )
+        assert item is not None
+        self.assertEqual(item.date_text, "24/07/2026")
+        self.assertEqual(item.text, "Envio de Documento Eletrônico")
+        self.assertEqual(item.documents, ())
+
+    def test_empty_card_is_ignored(self) -> None:
+        self.assertIsNone(item_from_card({"type": "", "fields": [], "all": ""}))
+
+    def test_portal_uses_its_own_connector_with_login_in_run(self) -> None:
+        connector = connector_for(CATALOG["tjrj-portal"])
+        self.assertIsInstance(connector, TjrjPortalConnector)
+        self.assertTrue(connector.login_per_run)
+        with self.assertRaises(ValueError):
+            TjrjPortalConnector(CATALOG["pje-tjrj-1g"])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class SessionPromptTests(unittest.TestCase):
+    def test_only_session_prompts_are_recognized(self) -> None:
+        for text in (
+            "Sua sessão irá expirar em 2 minutos. Deseja prolongar sua sessão?",
+            "Deseja estender a sessão?",
+            "A sessão está prestes a expirar. Deseja continuar?",
+        ):
+            self.assertTrue(is_session_prompt(text), text)
+        for text in (
+            "Deseja protocolar a petição?",
+            "Confirma a ciência da intimação?",
+            "Deseja sair do portal?",
+        ):
+            self.assertFalse(is_session_prompt(text), text)
+
+    def test_native_dialog_accepts_only_session_prompt(self) -> None:
+        class Dialog:
+            def __init__(self, message: str) -> None:
+                self.message = message
+                self.result = ""
+
+            def accept(self) -> None:
+                self.result = "accept"
+
+            def dismiss(self) -> None:
+                self.result = "dismiss"
+
+        session = Dialog("Deseja prolongar sua sessão?")
+        other = Dialog("Confirma a ciência da intimação?")
+        _answer_browser_dialog(session)
+        _answer_browser_dialog(other)
+        self.assertEqual((session.result, other.result), ("accept", "dismiss"))
+
+
+_PAGE = """<html><body>
+<div role="dialog" id="outro"><p>Deseja protocolar a petição?</p>
+<button id="ruim">Sim</button></div>
+<iframe srcdoc='<div class="p-dialog"><p>Sua sessão vai expirar. Deseja prolongar sua sessão?</p>
+<button onclick="parent.document.body.dataset.ok=1">Sim</button>
+<button>Não</button></div>'></iframe>
+<script>document.getElementById('ruim').onclick = () => document.body.dataset.ruim = 1</script>
+</body></html>"""
+
+
+@unittest.skipUnless(shutil.which("open") and Path(CHROME).exists(), "Google Chrome ausente")
+class SessionPromptBrowserTests(unittest.TestCase):
+    def test_clicks_yes_only_on_session_modal_inside_frame(self) -> None:
+        def run() -> tuple[bool, object, object]:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    page = browser.new_page()
+                    page.set_content(_PAGE)
+                    page.wait_for_timeout(500)
+                    clicked = keep_session(page)
+                    return (
+                        clicked,
+                        page.evaluate("document.body.dataset.ok"),
+                        page.evaluate("document.body.dataset.ruim"),
+                    )
+                finally:
+                    browser.close()
+
+        # Thread própria: outros testes deixam um laço asyncio que a API síncrona recusa.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            clicked, ok, wrong = pool.submit(run).result(timeout=120)
+        self.assertTrue(clicked)
+        self.assertEqual(ok, "1")
+        self.assertIsNone(wrong)
+
+
+_CARDS_PAGE = """<html><body>
+<app-movimento><div>Tipo do Movimento: Conclusão ao Juiz</div>
+<label class="control-label">Data:</label><label class="form-dados-estaticos">20/09/2026</label>
+</app-movimento>
+<app-movimento><div>Tipo do Movimento: Despacho fictício</div>
+<label class="control-label">Data:</label><label class="form-dados-estaticos">25/09/2026</label>
+<button>Ver Íntegra do(a) Despacho (Simplificado)</button>
+<a href="#" id="ato">Visualizar Ato Assinado Digitalmente</a>
+</app-movimento>
+<script>
+document.getElementById('ato').onclick = (e) => {
+  e.preventDefault();
+  const pdf = '%PDF-1.4\\n1 0 obj<<>>endobj\\ntrailer<<>>\\n%%EOF';
+  const url = URL.createObjectURL(new Blob([pdf], {type: 'application/pdf'}));
+  const embed = document.createElement('embed');
+  embed.type = 'application/pdf'; embed.src = url; document.body.appendChild(embed);
+};
+</script></body></html>"""
+
+
+@unittest.skipUnless(Path(CHROME).exists(), "Google Chrome ausente")
+class PortalDocumentBrowserTests(unittest.TestCase):
+    def test_reads_best_control_and_captures_embedded_pdf(self) -> None:
+        def run() -> tuple[list[tuple[str, int]], bytes]:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as playwright:
+                browser = playwright.chromium.launch(channel="chrome", headless=True)
+                try:
+                    context = browser.new_context()
+                    page = context.new_page()
+                    page.set_content(_CARDS_PAGE)
+                    connector = TjrjPortalConnector(CATALOG["tjrj-portal"])
+                    connector._page = page
+                    items = connector.read_timeline(page.main_frame)
+                    summary = [(item.text, len(item.documents)) for item in items]
+                    document = next(item for item in items if item.documents).documents[0]
+                    with tempfile.TemporaryDirectory() as folder:
+                        target = Path(folder) / "documento.pdf"
+                        connector.download_document(context, page.main_frame, document, target)
+                        return summary, target.read_bytes()
+                finally:
+                    browser.close()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            summary, data = pool.submit(run).result(timeout=120)
+        self.assertEqual(summary[0], ("Conclusão ao Juiz", 0))
+        self.assertEqual(summary[1][1], 1)
+        self.assertTrue(data.startswith(b"%PDF-1.4"), data[:120])
+
+    def test_best_document_prefers_signed_act(self) -> None:
+        card = {
+            "all": "x",
+            "docs": [
+                {"label": "Ver Íntegra do(a) Decisão (Simplificado)", "mark": "0-0"},
+                {"label": "Ver Íntegra Do(A) Decisão (Original)", "mark": "0-1"},
+                {"label": "Visualizar Ato Assinado Digitalmente", "mark": "0-2"},
+            ],
+        }
+        item = item_from_card({**card, "type": "Decisão", "fields": [["Data", "01/09/2026"]]}, 2)
+        assert item is not None
+        self.assertEqual(item.documents[0].label, "Visualizar Ato Assinado Digitalmente")
+        self.assertTrue(item.documents[0].href.startswith("portal:2:"))

@@ -63,6 +63,20 @@ def _visible_notice(page: Any) -> str:
     return f"; aviso na tela: {text[:80]}" if text else ""
 
 
+def _dialog_notice(dialogs: list[str]) -> str:
+    """Caixas alert/confirm recusadas ao abrir os autos (sem números), para o diagnóstico."""
+    return f"; caixa do navegador recusada: {dialogs[-1]}" if dialogs else ""
+
+
+def _record_dialog(dialogs: list[str], dialog: Any) -> None:
+    """Registra tipo e texto mascarado da caixa e a RECUSA: aceitar poderia registrar acesso
+    ou pedido em nome do advogado. A decisão de aceitar fica para revisão humana."""
+    text = re.sub(r"\d{3,}", "N", " ".join(str(dialog.message).split()))
+    dialogs.append(f"{dialog.type}: {text[:120]}")
+    with contextlib.suppress(Exception):
+        dialog.dismiss()
+
+
 _MONTHS = {
     "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
     "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
@@ -255,14 +269,18 @@ class PjeConnector:
             raise ConnectorError(
                 ErrorCode.SOURCE_UNAVAILABLE, "Processo não encontrado nesta fonte"
             )
+        dialogs: list[str] = []
+        page.on("dialog", lambda dialog: _record_dialog(dialogs, dialog))
         try:
             with context.expect_page(timeout=90_000) as popup:
                 link.click()
         except Exception as exc:
-            # Os autos não abriram (lentidão ou aviso na tela). Registra só o título do aviso
-            # visível, sem números, para o diagnóstico; a página fica aberta para o mapa.
+            # Os autos não abriram (lentidão, aviso na tela ou caixa alert/confirm). Registra
+            # só o título do aviso e o texto da caixa, sem números, para o diagnóstico; a
+            # página fica aberta para o mapa.
             raise ConnectorError(
-                ErrorCode.PARSE_ERROR, f"Autos não abriram em 90 s{_visible_notice(page)}"
+                ErrorCode.PARSE_ERROR,
+                f"Autos não abriram em 90 s{_visible_notice(page)}{_dialog_notice(dialogs)}",
             ) from exc
         autos = popup.value
         with contextlib.suppress(Exception):

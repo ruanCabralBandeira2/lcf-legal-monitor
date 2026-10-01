@@ -757,6 +757,7 @@ def _guided_recording(
     stamp: str,
     api_calls: list[str],
     trail: list[str],
+    console_errors: list[str],
 ) -> dict[str, Any]:
     """A pessoa navega no Portal (o SPA tem animações que confundem cliques automáticos);
     o robô só grava rotas, endereços internos e a estrutura final, tudo sem conteúdo."""
@@ -787,11 +788,25 @@ def _guided_recording(
         "trilha_da_navegacao": trail[before_trail:][:60],
         # Todos os endereços internos da sessão (a pessoa pode navegar antes do aviso).
         "enderecos_internos": api_calls[:120],
+        "enderecos_da_consulta": [call for call in api_calls if "consultaprocessual" in call][:60],
         "enderecos_depois_do_aviso": len(api_calls) - before_calls,
         "abas": [_route(tab.url) for tab in tabs],
     }
     if final is None:
         return result
+    # O quadro da consulta recarrega ao abrir o processo (2º teste no Mac, 30/09/2026: vazio
+    # no instante do Enter). Espera até 30 s por um quadro http com conteúdo desenhado.
+    for _ in range(30):
+        with contextlib.suppress(Exception):
+            if any(
+                frame != final.main_frame
+                and "consultaprocessual" in frame.url
+                and frame.locator("body *").count() > 30
+                for frame in final.frames
+            ):
+                break
+        final.wait_for_timeout(1_000)
+    final.wait_for_timeout(2_000)
     # Conteúdo dentro dos quadros embutidos (onde a consulta processual do Portal roda).
     frames = []
     for index, frame in enumerate(final.frames):
@@ -824,6 +839,22 @@ def _guided_recording(
             entry["erro"] = _masked(f"{type(exc).__name__}: {exc}", 150)
         frames.append(entry)
     result["quadros"] = frames
+    # Quadro vazio (1º teste no Mac, 30/09/2026): registra o endereço declarado de cada
+    # iframe e todos os quadros, inclusive os que não carregaram, para achar o bloqueio.
+    with contextlib.suppress(Exception):
+        result["iframes_declarados"] = [
+            _route(src) if src.startswith("http") else _masked(src, 60)
+            for src in final.evaluate(
+                "() => [...document.querySelectorAll('iframe')]"
+                ".map(f => f.src || f.getAttribute('src') || '(sem src)')"
+            )
+        ]
+    result["todos_os_quadros"] = [
+        _route(frame.url) if frame.url.startswith("http") else _masked(frame.url, 40)
+        for frame in final.frames
+        if frame != final.main_frame
+    ]
+    result["erros_do_console"] = console_errors[-30:]
     path = out_dir / f"estrutura-tjrj-portal-processo-{stamp}.json"
     EprocConnector.dump_structure(final, path)
     result["tela_final"] = {
@@ -926,13 +957,28 @@ def tjrj_diagnostic(
                 api_calls: list[str] = []
 
                 def record_call(request: Any) -> None:
-                    if request.resource_type in ("xhr", "fetch"):
+                    # A consulta do Portal (consultaprocessual) roda num quadro: grava qualquer
+                    # tipo de requisição dela, não só xhr/fetch.
+                    if request.resource_type in ("xhr", "fetch") or (
+                        "consultaprocessual" in request.url
+                        and request.resource_type not in ("image", "font", "stylesheet")
+                    ):
                         target = urlparse(request.url)
                         entry = f"{request.method} {target.hostname}{_masked(target.path, 140)}"
                         if entry not in api_calls:
                             api_calls.append(entry)
 
                 context.on("request", record_call)
+                # Erros do console (conteúdo misto, quadro recusado, CSP), só o texto mascarado.
+                console_errors: list[str] = []
+
+                def record_console(message: Any) -> None:
+                    if message.type in ("error", "warning"):
+                        entry = _masked(f"{message.type}: {message.text}", 200)
+                        if entry not in console_errors:
+                            console_errors.append(entry)
+
+                context.on("page", lambda tab: tab.on("console", record_console))
                 page = context.new_page()
                 page.goto(endpoint.base_url, wait_until="domcontentloaded")
                 page.wait_for_selector(endpoint.certificate_login_selector or "img", timeout=20_000)
@@ -999,7 +1045,7 @@ def tjrj_diagnostic(
                         )
                 elif "portalservicos" in page.url:
                     report["portal"]["gravacao"] = _guided_recording(
-                        context, formatted, out_dir, stamp, api_calls, trail
+                        context, formatted, out_dir, stamp, api_calls, trail, console_errors
                     )
             finally:
                 if browser.is_connected():
@@ -1044,11 +1090,50 @@ def alert_database_down(marker: Path, notifier: Any, now: datetime) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def _run_lock(path: Path) -> Any:
+    """Trava exclusiva por site: em 30/09/2026 duas rodadas do Portal correram juntas (uma
+    manual e outra esquecida). O sistema libera a trava sozinho se o processo morrer."""
+    try:
+        import fcntl
+    except ImportError:  # Windows: sem trava (o agendador já usa IgnoreNew)
+        yield True
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as handle:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+
 def monitor_run(
-    site: str | None = None, notify_initial: bool = False, interactive_login: bool = True
+    site: str | None = None,
+    notify_initial: bool = False,
+    interactive_login: bool = True,
+    max_processes: int | None = None,
 ) -> int:
     """Rodada completa: login por fonte, leitura, dedupe, download e e-mail (ADR-009)."""
     settings = Settings.from_env()
+    with _run_lock(settings.temp_dir / f"rodada-{site or 'todos'}.lock") as acquired:
+        if not acquired:
+            _emit({"ok": True, "site": site or "todos", "skipped": "rodada já em andamento"})
+            return 0
+        return _monitor_run_locked(settings, site, notify_initial, interactive_login, max_processes)
+
+
+def _monitor_run_locked(
+    settings: Settings,
+    site: str | None,
+    notify_initial: bool,
+    interactive_login: bool,
+    max_processes: int | None,
+) -> int:
     alerts = _auth_alert_service(settings)
     operator = _operator_notifier(settings)
 
@@ -1079,7 +1164,7 @@ def monitor_run(
     )
     marker = settings.temp_dir / "alerta-banco-fora.txt"
     try:
-        summary = service.run(site=site)
+        summary = service.run(site=site, max_processes=max_processes)
     except DatabaseUnavailable as exc:
         # 28-30/09/2026: Docker parado e rodadas falhando em silêncio por dois dias.
         alerted = alert_database_down(marker, operator, datetime.now(UTC))
@@ -1373,6 +1458,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="não abre janela de login: sessão caída só gera aviso (robôs de hora em hora)",
     )
+    monitor_parser.add_argument(
+        "--max-processos",
+        type=int,
+        default=None,
+        help="testa só os N primeiros processos de cada site (validação de conector novo)",
+    )
     import_parser = subcommands.add_parser(
         "import-processes", help="importa a carteira (um número por linha) e separa por site"
     )
@@ -1459,7 +1550,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "session-watch":
             return session_watch(args.source, args.every, args.max_hours, args.notify)
         if args.command == "monitor-run":
-            return monitor_run(args.site, args.notify_initial, not args.no_interactive_login)
+            return monitor_run(
+                args.site, args.notify_initial, not args.no_interactive_login, args.max_processos
+            )
         if args.command == "import-processes":
             return import_processes(args.path, args.lawyer, args.actor, args.dry_run)
         if args.command == "sites-report":

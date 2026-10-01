@@ -1,8 +1,17 @@
 # Contexto atual do projeto
 
-Atualizado em 30/09/2026. Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
+Atualizado em 30/09/2026 (noite, Mac mini). Este arquivo é o ponto de retomada rápido para pessoas e agentes de desenvolvimento. Deve ser atualizado no mesmo commit de cada mudança de marco, arquitetura, risco ou operação.
 
-## ▶ Retomada (30/09/2026): o projeto está mudando do Windows para o Mac mini
+## ▶ Retomada (30/09/2026, noite): operação migrada para o Mac mini
+
+- **O Mac mini (M4) é o servidor.** Projeto em `~/lcf-legal-monitor`, branch `claude/m4-rota-email-sessao`, versão 0.8.0. Banco restaurado do dump do Windows; robôs do Windows removidos pelo operador. Detalhes e pendências em `docs/runbooks/MIGRACAO_MAC.md`.
+- **Agendamento:** `ops/launchd/registrar-robos.sh` (LaunchAgents por site + `caffeinate`). Pedido do operador: todos os robôs na mesma hora (eproc no minuto 0 de cada hora; PJe e Portal às 06:00 e 18:00). O script já está nessa forma, mas o launchd ainda tem a agenda escalonada anterior (sem o Portal) até o teste conjunto.
+- **Portal de Serviços do TJRJ (44 processos de numeração antiga): concluído no núcleo.** Conector `tjrj_portal` (ADR-010): 44/44 lidos, 3.737 movimentações desde a distribuição; login dentro da rodada; "Sim" automático só no aviso de prolongar sessão; download de peça pelo "Ato Assinado"/"Ver Íntegra" validado em página sintética (falta uma novidade real com peça).
+- **Token no Mac:** SafeSign (tokenadmin) + Chrome para eproc e Portal; PJeOffice Pro para o PJe. O PIN fica em cache após a 1ª digitação (até reiniciar) — não foi preciso guardar PIN. Para o Portal rodar sem ninguém falta só a escolha do certificado (`AutoSelectCertificateForUrls`, decisão do titular).
+- **PJe TJRJ:** 3 de 5 ok. Os outros 2 abrem o aviso da Resolução CNJ (advogado não é parte); o robô recusa e o operador pediu para ignorá-los por enquanto.
+- **Autostart do servidor:** Docker, PJeOffice e Parsec como itens de início; login automático e "ligar após falta de energia" a configurar pelo operador nos Ajustes.
+
+## Retomada anterior (30/09/2026, manhã): mudança do Windows para o Mac mini
 
 - **Comece por `docs/runbooks/MIGRACAO_MAC.md`**: o que copiar (fora do Git: `.env`, `storage/carteira/astrea-2026-09-28.txt`, `storage/backups/legal_monitor-2026-09-30.dump`), como montar o Mac, logins e a lista de pendências em ordem.
 - **Branch de trabalho:** `claude/m4-rota-email-sessao` (33+ commits sobre `main`; push feito pelo operador antes da troca). Versão 0.7.0; 123 testes aprovados no Windows.

@@ -59,6 +59,7 @@ def build_movement_message(
     initial: bool = False,
     extra_documents: int = 0,
     restricted: bool = False,
+    missing_reason: str | None = None,
 ) -> NotificationMessage:
     text = item.text if len(item.text) <= MAX_MOVEMENT_TEXT else item.text[:MAX_MOVEMENT_TEXT] + "…"
     if restricted:
@@ -87,7 +88,10 @@ def build_movement_message(
             "Anexo: sim" if attached else f"Anexo: não enviado; guardado em {record.storage_path}",
         ]
     else:
-        lines.append("Documento: nenhum PDF obtido para esta movimentação")
+        lines.append(
+            "Documento: nenhum PDF obtido para esta movimentação"
+            + (f" - motivo: {missing_reason}" if missing_reason else "")
+        )
     if extra_documents:
         lines.append(
             f"Outros {extra_documents} documento(s) desta movimentação guardados no Mac mini/PC."
